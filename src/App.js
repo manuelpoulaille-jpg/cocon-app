@@ -79,10 +79,9 @@ export default function App() {
     <div className="app-root">
       <header className="app-header">
         <div className="header-left">
-          <div className="logo-sm">C+</div>
+          <img src="/logo.png" alt="Cocon+" style={{height:40,objectFit:"contain",marginRight:8}} />
           <div>
-            <span className="header-title">Cocon+</span>
-            <span className="header-role">{role === "admin" ? "Administration" : "Technicien"}</span>
+            <span className="header-role" style={{color:"rgba(255,255,255,0.9)",fontSize:12}}>{role === "admin" ? "Administration" : "Collaborateur"}</span>
           </div>
         </div>
         <button className="btn-logout" onClick={() => signOut(auth)}>Déconnexion</button>

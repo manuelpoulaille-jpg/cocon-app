@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, getDocs, query, orderBy, Timestamp } from "firebase/firestore";
-import { jsPDF } from "jspdf";
 
 const TYPES = [
   "Désinsectisation","Dératisation","Traitement anti-termites",
@@ -66,8 +65,8 @@ export default function AdminDashboard({ user }) {
     setTimeout(() => setMsg(""), 3000);
   };
 
-  const sc = (s) => ({ "planifié":"#E1F5EE","en cours":"#FFF3CD","terminé":"#D4EDDA" }[s] || "#eee");
-  const st = (s) => ({ "planifié":"#085041","en cours":"#856404","terminé":"#155724" }[s] || "#333");
+  const sc = (s) => ({ "planifié":"#d4f0ea","en cours":"#e8c9b8","terminé":"#35B499" }[s] || "#eee");
+  const st = (s) => ({ "planifié":"#1a7a65","en cours":"#6b4a31","terminé":"white" }[s] || "#333");
   const today = new Date().toISOString().split("T")[0];
   const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
 
@@ -85,9 +84,9 @@ export default function AdminDashboard({ user }) {
     }).length,
   };
 
-  const downloadPDF = (bon) => {
-    const JsPDF = window.jspdf ? window.jspdf.jsPDF : jsPDF;
-    const doc2 = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const downloadPDF = async (bon) => {
+    const { jsPDF } = await import("jspdf");
+    const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const W = 210, ml = 15, mr = 195;
     doc2.setFillColor(53, 180, 153);
     doc2.rect(0, 0, W, 28, "F");
@@ -259,29 +258,27 @@ export default function AdminDashboard({ user }) {
   return (
     <div className="container">
       {msg && <div className="success-msg">{msg}</div>}
-      <div className="dashboard-logo">
-        <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain",borderRadius:16,background:"white",padding:8,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}} />
-      </div>
+
       <div className="stats-grid">
-        <div className="stat-card" style={{background:"#E1F5EE"}}>
-          <div className="stat-num" style={{color:"#085041"}}>{stats.planifie}</div>
-          <div className="stat-label" style={{color:"#085041"}}>Planifiés</div>
+        <div className="stat-card" style={{background:"#d4f0ea"}}>
+          <div className="stat-num" style={{color:"#1a7a65"}}>{stats.planifie}</div>
+          <div className="stat-label" style={{color:"#1a7a65"}}>Planifiés</div>
         </div>
-        <div className="stat-card" style={{background:"#FFF3CD"}}>
-          <div className="stat-num" style={{color:"#856404"}}>{stats.enCours}</div>
-          <div className="stat-label" style={{color:"#856404"}}>En cours</div>
+        <div className="stat-card" style={{background:"#e8c9b8"}}>
+          <div className="stat-num" style={{color:"#6b4a31"}}>{stats.enCours}</div>
+          <div className="stat-label" style={{color:"#6b4a31"}}>En cours</div>
         </div>
-        <div className="stat-card" style={{background:"#D4EDDA"}}>
-          <div className="stat-num" style={{color:"#155724"}}>{stats.termine}</div>
-          <div className="stat-label" style={{color:"#155724"}}>Terminés</div>
+        <div className="stat-card" style={{background:"#35B499"}}>
+          <div className="stat-num" style={{color:"white"}}>{stats.termine}</div>
+          <div className="stat-label" style={{color:"white"}}>Terminés</div>
         </div>
-        <div className="stat-card" style={{background:"#E8F4FD"}}>
-          <div className="stat-num" style={{color:"#0c5460"}}>{stats.aujourdhui}</div>
-          <div className="stat-label" style={{color:"#0c5460"}}>Aujourd'hui</div>
+        <div className="stat-card" style={{background:"#8B6A4E"}}>
+          <div className="stat-num" style={{color:"white"}}>{stats.aujourdhui}</div>
+          <div className="stat-label" style={{color:"white"}}>Aujourd'hui</div>
         </div>
-        <div className="stat-card" style={{background:"#F3E5F5"}}>
-          <div className="stat-num" style={{color:"#4a148c"}}>{stats.semaine}</div>
-          <div className="stat-label" style={{color:"#4a148c"}}>Cette semaine</div>
+        <div className="stat-card" style={{background:"#2a9a82"}}>
+          <div className="stat-num" style={{color:"white"}}>{stats.semaine}</div>
+          <div className="stat-label" style={{color:"white"}}>Cette semaine</div>
         </div>
       </div>
       <div className="dash-actions">
