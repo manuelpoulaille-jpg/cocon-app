@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import {
-  collection, addDoc, getDocs, query, orderBy, Timestamp
-} from "firebase/firestore";
+import { collection, addDoc, getDocs, query, orderBy, Timestamp } from "firebase/firestore";
+import { jsPDF } from "jspdf";
 
 const TYPES = [
   "Désinsectisation","Dératisation","Traitement anti-termites",
@@ -56,12 +55,9 @@ export default function AdminDashboard({ user }) {
       statut: "planifié",
       createdAt: Timestamp.now(),
       createdBy: user.uid,
-      heureArrivee: null,
-      heureFin: null,
-      obsCocon: "",
-      obsClient: "",
-      signatureTech: null,
-      signatureClient: null,
+      heureArrivee: null, heureFin: null,
+      obsCocon: "", obsClient: "",
+      signatureTech: null, signatureClient: null,
     });
     setMsg("Bon créé !");
     setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",clientAdresse:"",types:[],datePrevue:"",heurePrevue:"",techId:"" });
@@ -74,6 +70,7 @@ export default function AdminDashboard({ user }) {
   const sc = (s) => ({ "planifié":"#E1F5EE","en cours":"#FFF3CD","terminé":"#D4EDDA" }[s] || "#eee");
   const st = (s) => ({ "planifié":"#085041","en cours":"#856404","terminé":"#155724" }[s] || "#333");
   const today = new Date().toISOString().split("T")[0];
+  const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
 
   const stats = {
     planifie: bons.filter(b => b.statut === "planifié").length,
@@ -87,6 +84,52 @@ export default function AdminDashboard({ user }) {
       const end = new Date(start); end.setDate(start.getDate() + 6);
       return d >= start && d <= end;
     }).length,
+  };
+
+  const downloadPDF = (bon) => {
+    const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210, ml = 15, mr = 195;
+    doc2.setFillColor(53, 180, 153);
+    doc2.rect(0, 0, W, 28, "F");
+    doc2.setTextColor(255,255,255);
+    doc2.setFontSize(16); doc2.setFont("helvetica","bold");
+    doc2.text("BON D'INTERVENTION", ml, 12);
+    doc2.setFontSize(9); doc2.setFont("helvetica","normal");
+    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", ml, 20);
+    doc2.text("N° " + bon.ref, mr, 12, { align:"right" });
+    doc2.text("Le " + new Date().toLocaleDateString("fr-FR"), mr, 20, { align:"right" });
+    let y = 35;
+    const section = (title) => {
+      doc2.setTextColor(53,180,153); doc2.setFontSize(9); doc2.setFont("helvetica","bold");
+      doc2.text(title, ml, y); y += 3;
+      doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
+      doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
+    };
+    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
+    section("TECHNICIEN"); row("Nom", bon.techNom); y += 2;
+    section("CLIENT");
+    row("Nom", bon.clientNom + " " + bon.clientPrenom);
+    row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
+    row("Adresse", bon.clientAdresse); y += 2;
+    section("INTERVENTION");
+    row("Type", bon.type);
+    row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
+    row("Arrivée réelle", fmt(bon.heureArrivee));
+    row("Fin intervention", fmt(bon.heureFin)); y += 2;
+    section("OBSERVATIONS");
+    const obsC = doc2.splitTextToSize("Cocon+ : " + (bon.obsCocon || "—"), 175);
+    doc2.text(obsC, ml, y); y += obsC.length * 5 + 3;
+    const obsCl = doc2.splitTextToSize("Client : " + (bon.obsClient || "—"), 175);
+    doc2.text(obsCl, ml, y); y += obsCl.length * 5 + 5;
+    section("SIGNATURES");
+    doc2.setFontSize(9); doc2.text("Technicien", ml, y); doc2.text("Client", ml+90, y); y += 3;
+    if (bon.signatureTech) { try { doc2.addImage(bon.signatureTech,"PNG",ml,y,80,30); } catch(e){} }
+    else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
+    if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
+    else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
+    doc2.setFontSize(8); doc2.setTextColor(150,150,150);
+    doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
+    doc2.save("bon-" + bon.ref + ".pdf");
   };
 
   const BonCard = ({ b, onClick }) => (
@@ -119,7 +162,6 @@ export default function AdminDashboard({ user }) {
           </div>
           <div className="field"><label>Adresse</label><input required value={form.clientAdresse} onChange={e=>setForm({...form,clientAdresse:e.target.value})} /></div>
         </div>
-
         <div className="card">
           <div className="card-title">Type(s) d'intervention</div>
           <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:10}}>Sélection multiple possible</p>
@@ -138,7 +180,6 @@ export default function AdminDashboard({ user }) {
             </div>
           )}
         </div>
-
         <div className="card">
           <div className="card-title">Planification</div>
           <div className="row2">
@@ -177,16 +218,19 @@ export default function AdminDashboard({ user }) {
         <div className="info-row"><span>Type(s)</span><b>{selected.type}</b></div>
         <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
         <div className="info-row"><span>Technicien</span><b>{selected.techNom}</b></div>
-        <div className="info-row"><span>Arrivée réelle</span><b>{selected.heureArrivee ? new Date(selected.heureArrivee.toDate()).toLocaleString("fr-FR") : "—"}</b></div>
-        <div className="info-row"><span>Fin</span><b>{selected.heureFin ? new Date(selected.heureFin.toDate()).toLocaleString("fr-FR") : "—"}</b></div>
+        <div className="info-row"><span>Arrivée réelle</span><b>{fmt(selected.heureArrivee)}</b></div>
+        <div className="info-row"><span>Fin</span><b>{fmt(selected.heureFin)}</b></div>
       </div>
       <div className="card">
         <div className="card-title">Observations</div>
         <div className="info-row"><span>Cocon+</span><b>{selected.obsCocon || "—"}</b></div>
         <div className="info-row"><span>Client</span><b>{selected.obsClient || "—"}</b></div>
       </div>
+      {selected.statut === "terminé" && (
+        <button className="btn-primary" onClick={() => downloadPDF(selected)}>Télécharger le PDF</button>
+      )}
       {selected.signatureTech && (
-        <div className="card">
+        <div className="card" style={{marginTop:"1rem"}}>
           <div className="card-title">Signatures</div>
           <div className="row2">
             <div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Technicien</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}} /></div>
@@ -214,7 +258,7 @@ export default function AdminDashboard({ user }) {
     <div className="container">
       {msg && <div className="success-msg">{msg}</div>}
       <div className="dashboard-logo">
-        <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain"}} />
+        <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain",borderRadius:16,background:"white",padding:8,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}} />
       </div>
       <div className="stats-grid">
         <div className="stat-card" style={{background:"#E1F5EE"}}>
@@ -242,13 +286,47 @@ export default function AdminDashboard({ user }) {
         <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon</button>
         <button className="btn-outline" onClick={() => setView("list")}>Tous les bons</button>
       </div>
+
       <div className="card" style={{marginTop:"1rem"}}>
         <div className="card-title">Bons du jour</div>
         {bons.filter(b => b.datePrevue === today).length === 0
           ? <div className="empty-state" style={{padding:"1rem 0"}}>Aucun bon prévu aujourd'hui.</div>
-          : bons.filter(b => b.datePrevue === today).map(b =>
-              <BonCard key={b.id} b={b} onClick={() => { setSelected(b); setView("detail"); }} />
-            )
+          : <div className="table-wrapper">
+              <table className="bons-table">
+                <thead>
+                  <tr>
+                    <th>Réf.</th>
+                    <th>Client</th>
+                    <th>Type</th>
+                    <th>Heure</th>
+                    <th>Technicien</th>
+                    <th>Statut</th>
+                    <th>PDF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bons.filter(b => b.datePrevue === today).map(b => (
+                    <tr key={b.id} onClick={() => { setSelected(b); setView("detail"); }} style={{cursor:"pointer"}}>
+                      <td><span className="bon-ref">{b.ref}</span></td>
+                      <td>
+                        <b style={{display:"block"}}>{b.clientNom} {b.clientPrenom}</b>
+                        <span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span>
+                      </td>
+                      <td style={{fontSize:12}}>{b.type}</td>
+                      <td style={{fontSize:13,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
+                      <td style={{fontSize:13}}>{b.techNom}</td>
+                      <td><span className="badge" style={{background:sc(b.statut),color:st(b.statut),whiteSpace:"nowrap"}}>{b.statut}</span></td>
+                      <td onClick={e => e.stopPropagation()}>
+                        {b.statut === "terminé"
+                          ? <button className="btn-pdf" onClick={() => downloadPDF(b)}>↓ PDF</button>
+                          : <span style={{color:"#ccc",fontSize:12}}>—</span>
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
         }
       </div>
     </div>
