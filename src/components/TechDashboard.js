@@ -21,9 +21,11 @@ export default function TechDashboard({ user }) {
   useEffect(() => { fetchBons(); }, []);
 
   const fetchBons = async () => {
+    const today = new Date().toISOString().split("T")[0];
     const q = query(collection(db, "bons"), where("techId", "==", user.uid));
     const snap = await getDocs(q);
-    setBons(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdAt?.seconds - a.createdAt?.seconds));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdAt?.seconds - a.createdAt?.seconds);
+    setBons(all.filter(b => b.datePrevue === today));
   };
 
   const openBon = (b) => {
