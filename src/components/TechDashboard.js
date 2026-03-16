@@ -142,7 +142,7 @@ export default function TechDashboard({ user }) {
     const obsCl = doc2.splitTextToSize("Client : " + (bon.obsClient || "—"), 175);
     doc2.text(obsCl, ml, y); y += obsCl.length * 5 + 5;
     section("SIGNATURES");
-    doc2.setFontSize(9); doc2.text("Technicien", ml, y); doc2.text("Client", ml + 90, y); y += 3;
+    doc2.setFontSize(9); doc2.text("Collaborateur", ml, y); doc2.text("Client", ml + 90, y); y += 3;
     if (bon.signatureTech) { try { doc2.addImage(bon.signatureTech, "PNG", ml, y, 80, 30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml, y, 80, 30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient, "PNG", ml + 90, y, 80, 30); } catch(e){} }
@@ -161,7 +161,7 @@ export default function TechDashboard({ user }) {
   if (sigMode) return (
     <div className="container">
       <div className="page-header">
-        <h2>Signature — {sigMode === "tech" ? "Technicien" : "Client"}</h2>
+        <h2>Signature — {sigMode === "tech" ? "Collaborateur" : "Client"}</h2>
       </div>
       <div className="card" style={{textAlign:"center"}}>
         <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12}}>Signez dans le cadre ci-dessous</p>
@@ -194,7 +194,7 @@ export default function TechDashboard({ user }) {
         <div className="card-title">Intervention <span className="locked-badge">🔒 Admin</span></div>
         <div className="info-row"><span>Type</span><b>{selected.type}</b></div>
         <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
-        <div className="info-row"><span>Technicien</span><b>{selected.techNom}</b></div>
+        <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
       </div>
 
       <div className="card">
@@ -238,7 +238,7 @@ export default function TechDashboard({ user }) {
             <div className="card-title">Signatures</div>
             <div className="row2">
               <div>
-                <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Technicien</p>
+                <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Collaborateur</p>
                 {sigTech ? <img src={sigTech} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("tech")}>Signer</button>}
               </div>

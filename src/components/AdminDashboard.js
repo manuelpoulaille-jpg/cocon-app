@@ -46,11 +46,10 @@ export default function AdminDashboard({ user }) {
     e.preventDefault();
     if (form.types.length === 0) { alert("Sélectionnez au moins un type d'intervention"); return; }
     setSaving(true);
-    const tech = techs.find(t => t.id === form.techId);
     await addDoc(collection(db, "bons"), {
       ...form,
       type: form.types.join(", "),
-      techNom: tech ? tech.nom + " " + tech.prenom : "",
+      techNom: form.techId,
       ref: refNum(),
       statut: "planifié",
       createdAt: Timestamp.now(),
@@ -187,10 +186,12 @@ export default function AdminDashboard({ user }) {
             <div className="field"><label>Heure prévue</label><input type="time" required value={form.heurePrevue} onChange={e=>setForm({...form,heurePrevue:e.target.value})} /></div>
           </div>
           <div className="field">
-            <label>Technicien assigné</label>
-            <select required value={form.techId} onChange={e=>setForm({...form,techId:e.target.value})}>
+            <label>Collaborateur assigné</label>
+            <select required value={form.techId} onChange={e=>setForm({...form,techId:e.target.value,techNom:e.target.value})}>
               <option value="">-- Sélectionner --</option>
-              {techs.map(t => <option key={t.id} value={t.id}>{t.nom} {t.prenom}</option>)}
+              <option value="Dimitri">Dimitri</option>
+              <option value="Georges">Georges</option>
+              <option value="Equipe">Equipe</option>
             </select>
           </div>
         </div>
@@ -217,7 +218,7 @@ export default function AdminDashboard({ user }) {
         <div className="card-title">Intervention</div>
         <div className="info-row"><span>Type(s)</span><b>{selected.type}</b></div>
         <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
-        <div className="info-row"><span>Technicien</span><b>{selected.techNom}</b></div>
+        <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
         <div className="info-row"><span>Arrivée réelle</span><b>{fmt(selected.heureArrivee)}</b></div>
         <div className="info-row"><span>Fin</span><b>{fmt(selected.heureFin)}</b></div>
       </div>
@@ -299,7 +300,7 @@ export default function AdminDashboard({ user }) {
                     <th>Client</th>
                     <th>Type</th>
                     <th>Heure</th>
-                    <th>Technicien</th>
+                    <th>Collaborateur</th>
                     <th>Statut</th>
                     <th>PDF</th>
                   </tr>
