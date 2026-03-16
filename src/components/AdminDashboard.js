@@ -86,7 +86,8 @@ export default function AdminDashboard({ user }) {
   };
 
   const downloadPDF = (bon) => {
-    const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const JsPDF = window.jspdf ? window.jspdf.jsPDF : jsPDF;
+    const doc2 = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const W = 210, ml = 15, mr = 195;
     doc2.setFillColor(53, 180, 153);
     doc2.rect(0, 0, W, 28, "F");
