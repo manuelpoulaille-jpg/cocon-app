@@ -18,6 +18,7 @@ export default function AdminDashboard({ user }) {
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => { fetchBons(); fetchTechs(); }, []);
 
@@ -242,6 +243,17 @@ export default function AdminDashboard({ user }) {
     </div>
   );
 
+  const filteredBons = bons.filter(b => {
+    const q = search.toLowerCase();
+    return !q || 
+      (b.clientNom + " " + b.clientPrenom).toLowerCase().includes(q) ||
+      b.ref?.toLowerCase().includes(q) ||
+      b.type?.toLowerCase().includes(q) ||
+      b.techNom?.toLowerCase().includes(q) ||
+      b.clientTel?.includes(q) ||
+      b.statut?.toLowerCase().includes(q);
+  });
+
   if (view === "list") return (
     <div className="container">
       <div className="page-header">
@@ -249,8 +261,19 @@ export default function AdminDashboard({ user }) {
         <h2>Tous les bons</h2>
         <button className="btn-primary sm" onClick={() => setView("new")}>+ Nouveau</button>
       </div>
-      {bons.length === 0 ? <div className="empty-state">Aucun bon.</div> :
-        bons.map(b => <BonCard key={b.id} b={b} onClick={() => { setSelected(b); setView("detail"); }} />)
+      <div className="search-bar">
+        <input 
+          type="text" 
+          placeholder="Rechercher par client, référence, type, collaborateur..." 
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e0e0e0",borderRadius:10,background:"white"}}
+        />
+        {search && <span className="search-count">{filteredBons.length} résultat{filteredBons.length > 1 ? "s" : ""}</span>}
+      </div>
+      {filteredBons.length === 0 
+        ? <div className="empty-state">Aucun bon trouvé.</div>
+        : filteredBons.map(b => <BonCard key={b.id} b={b} onClick={() => { setSelected(b); setView("detail"); }} />)
       }
     </div>
   );

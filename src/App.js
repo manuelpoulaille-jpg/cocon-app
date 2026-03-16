@@ -79,7 +79,7 @@ export default function App() {
     <div className="app-root">
       <header className="app-header">
         <div className="header-left">
-          <img src="/logo.png" alt="Cocon+" style={{height:40,objectFit:"contain",marginRight:8}} />
+          <img src="/logo.png" alt="Cocon+" style={{height:40,objectFit:"contain",marginRight:8,background:"white",borderRadius:8,padding:"3px 6px"}} />
           <div>
             <span className="header-role" style={{color:"rgba(255,255,255,0.9)",fontSize:12}}>{role === "admin" ? "Administration" : "Collaborateur"}</span>
           </div>
