@@ -3,7 +3,7 @@ import { db } from "../firebase";
 import { collection, query, where, getDocs, doc, updateDoc, Timestamp } from "firebase/firestore";
 import emailjs from "@emailjs/browser";
 
-const EMAILJS_SERVICE = "service_6org83e";
+const EMAILJS_SERVICE = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
 const EMAILJS_KEY = "JPyrwrjE8dQD_dT0a";
 
