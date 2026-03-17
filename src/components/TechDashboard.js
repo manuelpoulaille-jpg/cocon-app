@@ -187,7 +187,7 @@ export default function TechDashboard({ user }) {
       await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
     } catch(e) {
       console.error("Email error:", e);
-      setEmailStatus("error");
+      setEmailStatus("error: " + (e?.text || e?.message || JSON.stringify(e)));
     }
   };
 
@@ -285,17 +285,12 @@ export default function TechDashboard({ user }) {
               📍 Arrivé sur le chantier
             </button>
           )}
-          {selected.statut === "en cours" && (
-            <button className="btn-finish" disabled={saving} onClick={terminer}>
-              {saving ? "Finalisation…" : "✅ Terminer le chantier"}
-            </button>
-          )}
           {selected.statut === "terminé" && selected.emailEnvoye && (
             <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
           )}
         </div>
         {emailStatus === "sent" && <p style={{color:"#35B499",fontSize:13,marginTop:8}}>✅ Email envoyé au client !</p>}
-        {emailStatus === "error" && <p style={{color:"#e74c3c",fontSize:13,marginTop:8}}>⚠️ Erreur envoi email.</p>}
+        {emailStatus.startsWith("error") && <p style={{color:"#e74c3c",fontSize:11,marginTop:8,wordBreak:"break-all"}}>⚠️ {emailStatus}</p>}
         {emailStatus === "sending" && <p style={{color:"#888",fontSize:13,marginTop:8}}>Envoi de l'email…</p>}
       </div>
 
@@ -330,8 +325,13 @@ export default function TechDashboard({ user }) {
           </div>
 
           {selected.statut !== "terminé" && (
-            <button className="btn-outline" style={{width:"100%"}} disabled={saving} onClick={sauvegarder}>
+            <button className="btn-outline" style={{width:"100%",marginBottom:10}} disabled={saving} onClick={sauvegarder}>
               {saving ? "Sauvegarde…" : "Sauvegarder"}
+            </button>
+          )}
+          {selected.statut === "en cours" && (
+            <button className="btn-finish" style={{width:"100%"}} disabled={saving} onClick={terminer}>
+              {saving ? "Finalisation…" : "✅ Terminer le chantier"}
             </button>
           )}
         </>
