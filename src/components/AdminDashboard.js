@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, addDoc, getDocs, query, orderBy, Timestamp } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, orderBy, Timestamp, doc, updateDoc, deleteDoc } from "firebase/firestore";
 
 const TYPES = [
   "Désinsectisation","Dératisation","Traitement anti-termites",
@@ -9,28 +9,25 @@ const TYPES = [
 
 export default function AdminDashboard({ user }) {
   const [bons, setBons] = useState([]);
-  const [techs, setTechs] = useState([]);
   const [view, setView] = useState("dashboard");
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState({
-    clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",
-    clientAdresse:"",types:[],datePrevue:"",heurePrevue:"",techId:""
-  });
+  const [search, setSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-  const [search, setSearch] = useState("");
+  const [form, setForm] = useState({
+    clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
+    adresseFacturation:"", adresseIntervention:"",
+    demandeClient:"", numDevis:"",
+    types:[], datePrevue:"", heurePrevue:"", techId:""
+  });
 
-  useEffect(() => { fetchBons(); fetchTechs(); }, []);
+  useEffect(() => { fetchBons(); }, []);
 
   const fetchBons = async () => {
     const q = query(collection(db, "bons"), orderBy("createdAt", "desc"));
     const snap = await getDocs(q);
     setBons(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
-
-  const fetchTechs = async () => {
-    const snap = await getDocs(collection(db, "users"));
-    setTechs(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.role === "technicien"));
   };
 
   const refNum = () => "INT-" + Date.now().toString().slice(-6);
@@ -48,6 +45,7 @@ export default function AdminDashboard({ user }) {
     setSaving(true);
     await addDoc(collection(db, "bons"), {
       ...form,
+      clientAdresse: form.adresseIntervention,
       type: form.types.join(", "),
       techNom: form.techId,
       ref: refNum(),
@@ -59,37 +57,32 @@ export default function AdminDashboard({ user }) {
       signatureTech: null, signatureClient: null,
     });
     setMsg("Bon créé !");
-    setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",clientAdresse:"",types:[],datePrevue:"",heurePrevue:"",techId:"" });
+    setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",types:[],datePrevue:"",heurePrevue:"",techId:"" });
     setView("dashboard");
     fetchBons();
     setSaving(false);
     setTimeout(() => setMsg(""), 3000);
   };
 
+  const deleteBon = async () => {
+    await deleteDoc(doc(db, "bons", selected.id));
+    setConfirmDelete(false);
+    setSelected(null);
+    setView("list");
+    fetchBons();
+  };
+
   const sc = (s) => ({ "planifié":"#d4f0ea","en cours":"#e8c9b8","terminé":"#35B499" }[s] || "#eee");
   const st = (s) => ({ "planifié":"#1a7a65","en cours":"#6b4a31","terminé":"white" }[s] || "#333");
   const today = new Date().toISOString().split("T")[0];
   const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
+
   const calcDuree = (arrivee, fin) => {
     if (!arrivee || !fin) return "—";
     const diff = fin.toDate() - arrivee.toDate();
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
     return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
-  };
-
-  const stats = {
-    planifie: bons.filter(b => b.statut === "planifié").length,
-    enCours: bons.filter(b => b.statut === "en cours").length,
-    termine: bons.filter(b => b.statut === "terminé").length,
-    aujourdhui: bons.filter(b => b.datePrevue === today).length,
-    semaine: bons.filter(b => {
-      const d = new Date(b.datePrevue);
-      const now = new Date();
-      const start = new Date(now); start.setDate(now.getDate() - now.getDay());
-      const end = new Date(start); end.setDate(start.getDate() + 6);
-      return d >= start && d <= end;
-    }).length,
   };
 
   const downloadPDF = async (bon) => {
@@ -112,24 +105,33 @@ export default function AdminDashboard({ user }) {
       doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
       doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
     };
-    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
-    section("TECHNICIEN"); row("Nom", bon.techNom); y += 2;
+    const row = (label, val) => { if (y > 260) { doc2.addPage(); y = 20; } doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
+    section("INFORMATIONS");
+    row("Référence", bon.ref);
+    if (bon.numDevis) row("N° Devis", bon.numDevis);
+    row("Collaborateur", bon.techNom); y += 2;
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    row("Adresse", bon.clientAdresse); y += 2;
+    if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation);
+    row("Adresse intervention", bon.adresseIntervention || bon.clientAdresse); y += 2;
+    if (bon.demandeClient) { section("DEMANDE CLIENT"); const d = doc2.splitTextToSize(bon.demandeClient, 175); doc2.text(d, ml, y); y += d.length * 5 + 5; }
     section("INTERVENTION");
     row("Type", bon.type);
     row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
     row("Arrivée réelle", fmt(bon.heureArrivee));
-    row("Fin intervention", fmt(bon.heureFin)); y += 2;
-    section("OBSERVATIONS");
+    row("Fin intervention", fmt(bon.heureFin));
+    row("Durée", calcDuree(bon.heureArrivee, bon.heureFin));
+    if (bon.geoArrivee) row("Position arrivée", "Lat: " + bon.geoArrivee.lat?.toFixed(5) + ", Lng: " + bon.geoArrivee.lng?.toFixed(5));
+    if (bon.geoFin) row("Position fin", "Lat: " + bon.geoFin.lat?.toFixed(5) + ", Lng: " + bon.geoFin.lng?.toFixed(5));
+    y += 2;
+    section("COMPTE RENDU D'INTERVENTION");
     const obsC = doc2.splitTextToSize("Cocon+ : " + (bon.obsCocon || "—"), 175);
     doc2.text(obsC, ml, y); y += obsC.length * 5 + 3;
     const obsCl = doc2.splitTextToSize("Client : " + (bon.obsClient || "—"), 175);
     doc2.text(obsCl, ml, y); y += obsCl.length * 5 + 5;
     section("SIGNATURES");
-    doc2.setFontSize(9); doc2.text("Technicien", ml, y); doc2.text("Client", ml+90, y); y += 3;
+    doc2.setFontSize(9); doc2.text("Collaborateur", ml, y); doc2.text("Client", ml+90, y); y += 3;
     if (bon.signatureTech) { try { doc2.addImage(bon.signatureTech,"PNG",ml,y,80,30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
@@ -139,16 +141,41 @@ export default function AdminDashboard({ user }) {
     doc2.save("bon-" + bon.ref + ".pdf");
   };
 
+  const stats = {
+    planifie: bons.filter(b => b.statut === "planifié").length,
+    enCours: bons.filter(b => b.statut === "en cours").length,
+    termine: bons.filter(b => b.statut === "terminé").length,
+    aujourdhui: bons.filter(b => b.datePrevue === today).length,
+    semaine: bons.filter(b => {
+      const d = new Date(b.datePrevue);
+      const now = new Date();
+      const start = new Date(now); start.setDate(now.getDate() - now.getDay());
+      const end = new Date(start); end.setDate(start.getDate() + 6);
+      return d >= start && d <= end;
+    }).length,
+  };
+
   const BonCard = ({ b, onClick }) => (
     <div className="bon-card" onClick={onClick}>
       <div className="bon-card-top">
-        <span className="bon-ref">{b.ref}</span>
+        <span className="bon-ref">{b.ref}{b.numDevis ? " · " + b.numDevis : ""}</span>
         <span className="badge" style={{background:sc(b.statut),color:st(b.statut)}}>{b.statut}</span>
       </div>
       <div className="bon-card-body"><b>{b.clientNom} {b.clientPrenom}</b><span>{b.type}</span></div>
       <div className="bon-card-footer"><span>{b.datePrevue} à {b.heurePrevue}</span><span>{b.techNom}</span></div>
     </div>
   );
+
+  const filteredBons = bons.filter(b => {
+    const q = search.toLowerCase();
+    return !q ||
+      (b.clientNom + " " + b.clientPrenom).toLowerCase().includes(q) ||
+      b.ref?.toLowerCase().includes(q) ||
+      b.numDevis?.toLowerCase().includes(q) ||
+      b.type?.toLowerCase().includes(q) ||
+      b.techNom?.toLowerCase().includes(q) ||
+      b.statut?.toLowerCase().includes(q);
+  });
 
   if (view === "new") return (
     <div className="container">
@@ -158,7 +185,28 @@ export default function AdminDashboard({ user }) {
       </div>
       <form onSubmit={createBon}>
         <div className="card">
-          <div className="card-title">Client</div>
+          <div className="card-title">Informations générales</div>
+          <div className="row2">
+            <div className="field"><label>N° Devis</label><input value={form.numDevis} onChange={e=>setForm({...form,numDevis:e.target.value})} placeholder="ex: DEV-2026-001" /></div>
+            <div className="field"><label>Date prévue</label><input type="date" required value={form.datePrevue} onChange={e=>setForm({...form,datePrevue:e.target.value})} /></div>
+          </div>
+          <div className="row2">
+            <div className="field"><label>Heure prévue</label><input type="time" required value={form.heurePrevue} onChange={e=>setForm({...form,heurePrevue:e.target.value})} /></div>
+            <div className="field">
+              <label>Collaborateur assigné</label>
+              <select required value={form.techId} onChange={e=>setForm({...form,techId:e.target.value})}>
+                <option value="">-- Sélectionner --</option>
+                <option value="Dimitri">Dimitri</option>
+                <option value="Georges">Georges</option>
+                <option value="Brayann">Brayann</option>
+                <option value="Equipe">Equipe</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Informations client</div>
           <div className="row2">
             <div className="field"><label>Nom</label><input required value={form.clientNom} onChange={e=>setForm({...form,clientNom:e.target.value})} /></div>
             <div className="field"><label>Prénom</label><input required value={form.clientPrenom} onChange={e=>setForm({...form,clientPrenom:e.target.value})} /></div>
@@ -167,8 +215,15 @@ export default function AdminDashboard({ user }) {
             <div className="field"><label>Téléphone</label><input value={form.clientTel} onChange={e=>setForm({...form,clientTel:e.target.value})} /></div>
             <div className="field"><label>Email</label><input type="email" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})} /></div>
           </div>
-          <div className="field"><label>Adresse</label><input required value={form.clientAdresse} onChange={e=>setForm({...form,clientAdresse:e.target.value})} /></div>
+          <div className="field"><label>Adresse de facturation</label><input value={form.adresseFacturation} onChange={e=>setForm({...form,adresseFacturation:e.target.value})} placeholder="Adresse de facturation" /></div>
+          <div className="field"><label>Adresse d'intervention</label><input required value={form.adresseIntervention} onChange={e=>setForm({...form,adresseIntervention:e.target.value})} placeholder="Adresse du chantier" /></div>
         </div>
+
+        <div className="card">
+          <div className="card-title">Informations sur la demande du client</div>
+          <div className="field"><label>Description de la demande</label><textarea value={form.demandeClient} onChange={e=>setForm({...form,demandeClient:e.target.value})} placeholder="Contexte, motif, demandes spécifiques du client…" /></div>
+        </div>
+
         <div className="card">
           <div className="card-title">Type(s) d'intervention</div>
           <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:10}}>Sélection multiple possible</p>
@@ -187,23 +242,7 @@ export default function AdminDashboard({ user }) {
             </div>
           )}
         </div>
-        <div className="card">
-          <div className="card-title">Planification</div>
-          <div className="row2">
-            <div className="field"><label>Date prévue</label><input type="date" required value={form.datePrevue} onChange={e=>setForm({...form,datePrevue:e.target.value})} /></div>
-            <div className="field"><label>Heure prévue</label><input type="time" required value={form.heurePrevue} onChange={e=>setForm({...form,heurePrevue:e.target.value})} /></div>
-          </div>
-          <div className="field">
-            <label>Collaborateur assigné</label>
-            <select required value={form.techId} onChange={e=>setForm({...form,techId:e.target.value,techNom:e.target.value})}>
-              <option value="">-- Sélectionner --</option>
-              <option value="Dimitri">Dimitri</option>
-              <option value="Georges">Georges</option>
-              <option value="Brayann">Brayann</option>
-              <option value="Equipe">Equipe</option>
-            </select>
-          </div>
-        </div>
+
         <button type="submit" className="btn-primary" disabled={saving}>{saving ? "Création…" : "Créer le bon"}</button>
       </form>
     </div>
@@ -211,23 +250,50 @@ export default function AdminDashboard({ user }) {
 
   if (view === "detail" && selected) return (
     <div className="container">
+      {confirmDelete && (
+        <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:"1rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+          <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la suppression de ce bon ?</span>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn-outline" onClick={() => setConfirmDelete(false)}>Annuler</button>
+            <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteBon}>Supprimer définitivement</button>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
-        <button className="btn-back" onClick={() => { setView("list"); setSelected(null); }}>← Retour</button>
+        <button className="btn-back" onClick={() => { setView("list"); setSelected(null); setConfirmDelete(false); }}>← Retour</button>
         <h2>{selected.ref}</h2>
         <span className="badge" style={{background:sc(selected.statut),color:st(selected.statut)}}>{selected.statut}</span>
+        <button style={{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12,marginLeft:"auto"}} onClick={() => setConfirmDelete(true)}>Supprimer</button>
       </div>
+
+      <div className="card">
+        <div className="card-title">Informations générales</div>
+        {selected.numDevis && <div className="info-row"><span>N° Devis</span><b>{selected.numDevis}</b></div>}
+        <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
+        <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
+        <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
+      </div>
+
       <div className="card">
         <div className="card-title">Client</div>
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
-        <div className="info-row"><span>Adresse</span><b>{selected.clientAdresse}</b></div>
+        <div className="info-row"><span>Adresse facturation</span><b>{selected.adresseFacturation || "—"}</b></div>
+        <div className="info-row"><span>Adresse intervention</span><b>{selected.adresseIntervention || selected.clientAdresse || "—"}</b></div>
       </div>
+
+      {selected.demandeClient && (
+        <div className="card">
+          <div className="card-title">Informations sur la demande du client</div>
+          <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6}}>{selected.demandeClient}</p>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-title">Intervention</div>
         <div className="info-row"><span>Type(s)</span><b>{selected.type}</b></div>
-        <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
-        <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
         <div className="info-row"><span>Arrivée réelle</span><b>{fmt(selected.heureArrivee)}</b></div>
         <div className="info-row"><span>Fin</span><b>{fmt(selected.heureFin)}</b></div>
         {selected.heureArrivee && selected.heureFin && (
@@ -236,37 +302,32 @@ export default function AdminDashboard({ user }) {
         {selected.geoArrivee && (
           <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
         )}
+        {selected.geoFin && (
+          <div className="info-row"><span>Position fin</span><b style={{fontSize:12}}>📍 {selected.geoFin.lat?.toFixed(4)}, {selected.geoFin.lng?.toFixed(4)}</b></div>
+        )}
       </div>
+
       <div className="card">
-        <div className="card-title">Observations</div>
+        <div className="card-title">Compte rendu d'intervention</div>
         <div className="info-row"><span>Cocon+</span><b>{selected.obsCocon || "—"}</b></div>
         <div className="info-row"><span>Client</span><b>{selected.obsClient || "—"}</b></div>
       </div>
-      {selected.statut === "terminé" && (
-        <button className="btn-primary" onClick={() => downloadPDF(selected)}>Télécharger le PDF</button>
-      )}
+
       {selected.signatureTech && (
-        <div className="card" style={{marginTop:"1rem"}}>
+        <div className="card">
           <div className="card-title">Signatures</div>
           <div className="row2">
-            <div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Technicien</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}} /></div>
+            <div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}} /></div>
             {selected.signatureClient && <div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}} /></div>}
           </div>
         </div>
       )}
+
+      {selected.statut === "terminé" && (
+        <button className="btn-primary" onClick={() => downloadPDF(selected)}>Télécharger le PDF</button>
+      )}
     </div>
   );
-
-  const filteredBons = bons.filter(b => {
-    const q = search.toLowerCase();
-    return !q || 
-      (b.clientNom + " " + b.clientPrenom).toLowerCase().includes(q) ||
-      b.ref?.toLowerCase().includes(q) ||
-      b.type?.toLowerCase().includes(q) ||
-      b.techNom?.toLowerCase().includes(q) ||
-      b.clientTel?.includes(q) ||
-      b.statut?.toLowerCase().includes(q);
-  });
 
   if (view === "list") return (
     <div className="container">
@@ -276,18 +337,11 @@ export default function AdminDashboard({ user }) {
         <button className="btn-primary sm" onClick={() => setView("new")}>+ Nouveau</button>
       </div>
       <div className="search-bar">
-        <input 
-          type="text" 
-          placeholder="Rechercher par client, référence, type, collaborateur..." 
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e0e0e0",borderRadius:10,background:"white"}}
-        />
+        <input type="text" placeholder="Rechercher par client, référence, devis, type…" value={search} onChange={e => setSearch(e.target.value)} style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e0e0e0",borderRadius:10,background:"white"}} />
         {search && <span className="search-count">{filteredBons.length} résultat{filteredBons.length > 1 ? "s" : ""}</span>}
       </div>
-      {filteredBons.length === 0 
-        ? <div className="empty-state">Aucun bon trouvé.</div>
-        : filteredBons.map(b => <BonCard key={b.id} b={b} onClick={() => { setSelected(b); setView("detail"); }} />)
+      {filteredBons.length === 0 ? <div className="empty-state">Aucun bon trouvé.</div> :
+        filteredBons.map(b => <BonCard key={b.id} b={b} onClick={() => { setSelected(b); setView("detail"); }} />)
       }
     </div>
   );
@@ -295,34 +349,20 @@ export default function AdminDashboard({ user }) {
   return (
     <div className="container">
       {msg && <div className="success-msg">{msg}</div>}
-
+      <div className="dashboard-logo">
+        <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain",borderRadius:16,background:"white",padding:8,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}} />
+      </div>
       <div className="stats-grid">
-        <div className="stat-card" style={{background:"#d4f0ea"}}>
-          <div className="stat-num" style={{color:"#1a7a65"}}>{stats.planifie}</div>
-          <div className="stat-label" style={{color:"#1a7a65"}}>Planifiés</div>
-        </div>
-        <div className="stat-card" style={{background:"#e8c9b8"}}>
-          <div className="stat-num" style={{color:"#6b4a31"}}>{stats.enCours}</div>
-          <div className="stat-label" style={{color:"#6b4a31"}}>En cours</div>
-        </div>
-        <div className="stat-card" style={{background:"#35B499"}}>
-          <div className="stat-num" style={{color:"white"}}>{stats.termine}</div>
-          <div className="stat-label" style={{color:"white"}}>Terminés</div>
-        </div>
-        <div className="stat-card" style={{background:"#8B6A4E"}}>
-          <div className="stat-num" style={{color:"white"}}>{stats.aujourdhui}</div>
-          <div className="stat-label" style={{color:"white"}}>Aujourd'hui</div>
-        </div>
-        <div className="stat-card" style={{background:"#2a9a82"}}>
-          <div className="stat-num" style={{color:"white"}}>{stats.semaine}</div>
-          <div className="stat-label" style={{color:"white"}}>Cette semaine</div>
-        </div>
+        <div className="stat-card" style={{background:"#d4f0ea"}}><div className="stat-num" style={{color:"#1a7a65"}}>{stats.planifie}</div><div className="stat-label" style={{color:"#1a7a65"}}>Planifiés</div></div>
+        <div className="stat-card" style={{background:"#e8c9b8"}}><div className="stat-num" style={{color:"#6b4a31"}}>{stats.enCours}</div><div className="stat-label" style={{color:"#6b4a31"}}>En cours</div></div>
+        <div className="stat-card" style={{background:"#35B499"}}><div className="stat-num" style={{color:"white"}}>{stats.termine}</div><div className="stat-label" style={{color:"white"}}>Terminés</div></div>
+        <div className="stat-card" style={{background:"#8B6A4E"}}><div className="stat-num" style={{color:"white"}}>{stats.aujourdhui}</div><div className="stat-label" style={{color:"white"}}>Aujourd'hui</div></div>
+        <div className="stat-card" style={{background:"#2a9a82"}}><div className="stat-num" style={{color:"white"}}>{stats.semaine}</div><div className="stat-label" style={{color:"white"}}>Cette semaine</div></div>
       </div>
       <div className="dash-actions">
         <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon</button>
         <button className="btn-outline" onClick={() => setView("list")}>Tous les bons</button>
       </div>
-
       <div className="card" style={{marginTop:"1rem"}}>
         <div className="card-title">Bons du jour</div>
         {bons.filter(b => b.datePrevue === today).length === 0
@@ -332,6 +372,7 @@ export default function AdminDashboard({ user }) {
                 <thead>
                   <tr>
                     <th>Réf.</th>
+                    <th>N° Devis</th>
                     <th>Client</th>
                     <th>Type</th>
                     <th>Heure</th>
@@ -344,10 +385,8 @@ export default function AdminDashboard({ user }) {
                   {bons.filter(b => b.datePrevue === today).map(b => (
                     <tr key={b.id} onClick={() => { setSelected(b); setView("detail"); }} style={{cursor:"pointer"}}>
                       <td><span className="bon-ref">{b.ref}</span></td>
-                      <td>
-                        <b style={{display:"block"}}>{b.clientNom} {b.clientPrenom}</b>
-                        <span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span>
-                      </td>
+                      <td style={{fontSize:12,color:"#888"}}>{b.numDevis || "—"}</td>
+                      <td><b style={{display:"block"}}>{b.clientNom} {b.clientPrenom}</b><span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span></td>
                       <td style={{fontSize:12}}>{b.type}</td>
                       <td style={{fontSize:13,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
                       <td style={{fontSize:13}}>{b.techNom}</td>

@@ -94,10 +94,8 @@ export default function TechDashboard({ user }) {
     setSelected(fullBon);
     fetchBons();
 
-    const pdf = await generatePDF(fullBon);
-
     if (selected.clientEmail) {
-      await sendEmail(fullBon, pdf);
+      await sendEmail(fullBon);
     }
     setSaving(false);
   };
@@ -108,7 +106,7 @@ export default function TechDashboard({ user }) {
     setSaving(false);
   };
 
-  const generatePDF = async (bon) => {
+  const generatePDF = async (bon, autoSave = true) => {
     const { jsPDF } = await import("jspdf");
     const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const W = 210, ml = 15, mr = 195;
@@ -160,14 +158,16 @@ export default function TechDashboard({ user }) {
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
 
-    doc2.save("bon-" + bon.ref + ".pdf");
+    if (autoSave) doc2.save("bon-" + bon.ref + ".pdf");
     return doc2.output("datauristring");
   };
 
-  const sendEmail = async (bon, pdfData) => {
+  const sendEmail = async (bon) => {
     const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
     setEmailStatus("sending");
     try {
+      const pdfBase64 = await generatePDF(bon, false);
+      const base64Content = pdfBase64.split(",")[1];
       await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
         to_email: bon.clientEmail,
         client_nom: bon.clientNom + " " + bon.clientPrenom,
@@ -180,11 +180,13 @@ export default function TechDashboard({ user }) {
         collaborateur: bon.techNom,
         adresse: bon.clientAdresse,
         observations: bon.obsCocon || "—",
+        attachment: base64Content,
+        attachment_name: "bon-" + bon.ref + ".pdf",
       }, EMAILJS_KEY);
       setEmailStatus("sent");
       await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
     } catch(e) {
-      console.error(e);
+      console.error("Email error:", e);
       setEmailStatus("error");
     }
   };
@@ -288,10 +290,8 @@ export default function TechDashboard({ user }) {
               {saving ? "Finalisation…" : "✅ Terminer le chantier"}
             </button>
           )}
-          {selected.statut === "terminé" && (
-            <button className="btn-primary sm" onClick={() => generatePDF(selected)}>
-              📄 Télécharger le PDF
-            </button>
+          {selected.statut === "terminé" && selected.emailEnvoye && (
+            <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
           )}
         </div>
         {emailStatus === "sent" && <p style={{color:"#35B499",fontSize:13,marginTop:8}}>✅ Email envoyé au client !</p>}
