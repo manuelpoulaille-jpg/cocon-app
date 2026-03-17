@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
-import {
-  collection, query, where, getDocs, doc, updateDoc, Timestamp
-} from "firebase/firestore";
-import { jsPDF } from "jspdf";
+import { collection, query, where, getDocs, doc, updateDoc, Timestamp } from "firebase/firestore";
+import emailjs from "@emailjs/browser";
+
+const EMAILJS_SERVICE = "service_6org83e";
+const EMAILJS_TEMPLATE = "template_vy44z8h";
+const EMAILJS_KEY = "JPyrwrjE8dQD_dT0a";
 
 export default function TechDashboard({ user }) {
   const [bons, setBons] = useState([]);
@@ -12,9 +14,10 @@ export default function TechDashboard({ user }) {
   const [obsCocon, setObsCocon] = useState("");
   const [obsClient, setObsClient] = useState("");
   const [saving, setSaving] = useState(false);
-  const [sigMode, setSigMode] = useState(null); // "tech" | "client"
+  const [sigMode, setSigMode] = useState(null);
   const [sigTech, setSigTech] = useState(null);
   const [sigClient, setSigClient] = useState(null);
+  const [emailStatus, setEmailStatus] = useState("");
   const canvasRef = useRef(null);
   const drawing = useRef(false);
 
@@ -22,10 +25,13 @@ export default function TechDashboard({ user }) {
 
   const fetchBons = async () => {
     const today = new Date().toISOString().split("T")[0];
-    const q = query(collection(db, "bons"), where("techId", "==", user.uid));
-    const snap = await getDocs(q);
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdAt?.seconds - a.createdAt?.seconds);
-    setBons(all.filter(b => b.datePrevue === today));
+    const snap = await getDocs(collection(db, "bons"));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const filtered = all.filter(b => 
+      b.datePrevue === today && 
+      (b.techId === user.uid || b.techNom === "Equipe")
+    ).sort((a,b) => (a.heurePrevue || "").localeCompare(b.heurePrevue || ""));
+    setBons(filtered);
   };
 
   const openBon = (b) => {
@@ -34,16 +40,37 @@ export default function TechDashboard({ user }) {
     setObsClient(b.obsClient || "");
     setSigTech(b.signatureTech || null);
     setSigClient(b.signatureClient || null);
+    setEmailStatus("");
     setView("bon");
+  };
+
+  const getGeoLocation = () => new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { timeout: 5000 }
+    );
+  });
+
+  const calcDuree = (arrivee, fin) => {
+    if (!arrivee || !fin) return "—";
+    const diff = fin.toDate() - arrivee.toDate();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return h > 0 ? `${h}h${m.toString().padStart(2,"0")}` : `${m} min`;
   };
 
   const arriver = async () => {
     setSaving(true);
+    const geo = await getGeoLocation();
+    const now = Timestamp.now();
     await updateDoc(doc(db, "bons", selected.id), {
-      heureArrivee: Timestamp.now(),
-      statut: "en cours"
+      heureArrivee: now,
+      statut: "en cours",
+      geoArrivee: geo
     });
-    const updated = { ...selected, heureArrivee: Timestamp.now(), statut: "en cours" };
+    const updated = { ...selected, heureArrivee: now, statut: "en cours", geoArrivee: geo };
     setSelected(updated);
     fetchBons();
     setSaving(false);
@@ -51,19 +78,28 @@ export default function TechDashboard({ user }) {
 
   const terminer = async () => {
     setSaving(true);
-    await updateDoc(doc(db, "bons", selected.id), {
-      heureFin: Timestamp.now(),
+    const geo = await getGeoLocation();
+    const now = Timestamp.now();
+    const bonData = {
+      heureFin: now,
       statut: "terminé",
       obsCocon,
       obsClient,
       signatureTech: sigTech,
       signatureClient: sigClient,
-    });
-    const updated = { ...selected, heureFin: Timestamp.now(), statut: "terminé" };
-    setSelected(updated);
+      geoFin: geo
+    };
+    await updateDoc(doc(db, "bons", selected.id), bonData);
+    const fullBon = { ...selected, ...bonData };
+    setSelected(fullBon);
     fetchBons();
+
+    const pdf = await generatePDF(fullBon);
+
+    if (selected.clientEmail) {
+      await sendEmail(fullBon, pdf);
+    }
     setSaving(false);
-    generatePDF({ ...selected, heureFin: Timestamp.now(), statut: "terminé", obsCocon, obsClient, signatureTech: sigTech, signatureClient: sigClient });
   };
 
   const sauvegarder = async () => {
@@ -72,7 +108,87 @@ export default function TechDashboard({ user }) {
     setSaving(false);
   };
 
-  // Signature canvas
+  const generatePDF = async (bon) => {
+    const { jsPDF } = await import("jspdf");
+    const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210, ml = 15, mr = 195;
+    const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
+
+    doc2.setFillColor(53, 180, 153);
+    doc2.rect(0, 0, W, 28, "F");
+    doc2.setTextColor(255,255,255);
+    doc2.setFontSize(16); doc2.setFont("helvetica","bold");
+    doc2.text("BON D'INTERVENTION", ml, 12);
+    doc2.setFontSize(9); doc2.setFont("helvetica","normal");
+    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", ml, 20);
+    doc2.text("N° " + bon.ref, mr, 12, { align:"right" });
+    doc2.text("Le " + new Date().toLocaleDateString("fr-FR"), mr, 20, { align:"right" });
+
+    let y = 35;
+    const section = (title) => {
+      doc2.setTextColor(53,180,153); doc2.setFontSize(9); doc2.setFont("helvetica","bold");
+      doc2.text(title, ml, y); y += 3;
+      doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
+      doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
+    };
+    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
+
+    section("COLLABORATEUR"); row("Nom", bon.techNom); y += 2;
+    section("CLIENT");
+    row("Nom", bon.clientNom + " " + bon.clientPrenom);
+    row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
+    row("Adresse", bon.clientAdresse); y += 2;
+    section("INTERVENTION");
+    row("Type", bon.type);
+    row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
+    row("Arrivée réelle", fmt(bon.heureArrivee));
+    row("Fin intervention", fmt(bon.heureFin));
+    row("Durée", calcDuree(bon.heureArrivee, bon.heureFin));
+    if (bon.geoArrivee) row("Position arrivée", `Lat: ${bon.geoArrivee.lat?.toFixed(5)}, Lng: ${bon.geoArrivee.lng?.toFixed(5)}`);
+    y += 2;
+    section("OBSERVATIONS");
+    const obsC = doc2.splitTextToSize("Cocon+ : " + (bon.obsCocon || "—"), 175);
+    doc2.text(obsC, ml, y); y += obsC.length * 5 + 3;
+    const obsCl = doc2.splitTextToSize("Client : " + (bon.obsClient || "—"), 175);
+    doc2.text(obsCl, ml, y); y += obsCl.length * 5 + 5;
+    section("SIGNATURES");
+    doc2.setFontSize(9); doc2.text("Collaborateur", ml, y); doc2.text("Client", ml+90, y); y += 3;
+    if (bon.signatureTech) { try { doc2.addImage(bon.signatureTech,"PNG",ml,y,80,30); } catch(e){} }
+    else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
+    if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
+    else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
+    doc2.setFontSize(8); doc2.setTextColor(150,150,150);
+    doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
+
+    doc2.save("bon-" + bon.ref + ".pdf");
+    return doc2.output("datauristring");
+  };
+
+  const sendEmail = async (bon, pdfData) => {
+    const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
+    setEmailStatus("sending");
+    try {
+      await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
+        to_email: bon.clientEmail,
+        client_nom: bon.clientNom + " " + bon.clientPrenom,
+        ref: bon.ref,
+        type: bon.type,
+        date_prevue: bon.datePrevue,
+        heure_prevue: bon.heurePrevue,
+        heure_arrivee: fmt(bon.heureArrivee),
+        heure_fin: fmt(bon.heureFin),
+        collaborateur: bon.techNom,
+        adresse: bon.clientAdresse,
+        observations: bon.obsCocon || "—",
+      }, EMAILJS_KEY);
+      setEmailStatus("sent");
+      await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
+    } catch(e) {
+      console.error(e);
+      setEmailStatus("error");
+    }
+  };
+
   const startSig = (mode) => {
     setSigMode(mode);
     setTimeout(() => {
@@ -102,61 +218,9 @@ export default function TechDashboard({ user }) {
     setSigMode(null);
   };
 
-  const generatePDF = (bon) => {
-    const { jsPDF: PDF } = window.jspdf || {};
-    const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210, ml = 15, mr = 195;
-
-    doc2.setFillColor(53, 180, 153);
-    doc2.rect(0, 0, W, 28, "F");
-    doc2.setTextColor(255, 255, 255);
-    doc2.setFontSize(16); doc2.setFont("helvetica", "bold");
-    doc2.text("BON D'INTERVENTION", ml, 12);
-    doc2.setFontSize(9); doc2.setFont("helvetica", "normal");
-    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", ml, 20);
-    doc2.text("N° " + bon.ref, mr, 12, { align: "right" });
-    doc2.text("Le " + new Date().toLocaleDateString("fr-FR"), mr, 20, { align: "right" });
-
-    let y = 35;
-    const section = (title) => {
-      doc2.setTextColor(53, 180, 153); doc2.setFontSize(9); doc2.setFont("helvetica", "bold");
-      doc2.text(title, ml, y); y += 3;
-      doc2.setDrawColor(53, 180, 153); doc2.line(ml, y, mr, y); y += 5;
-      doc2.setTextColor(60, 60, 60); doc2.setFont("helvetica", "normal"); doc2.setFontSize(10);
-    };
-    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
-
-    section("TECHNICIEN"); row("Nom", bon.techNom); y += 2;
-    section("CLIENT");
-    row("Nom", bon.clientNom + " " + bon.clientPrenom);
-    row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    row("Adresse", bon.clientAdresse); y += 2;
-    section("INTERVENTION");
-    row("Type", bon.type);
-    row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
-    row("Arrivée réelle", bon.heureArrivee ? new Date(bon.heureArrivee.toDate()).toLocaleString("fr-FR") : "—");
-    row("Fin intervention", bon.heureFin ? new Date(bon.heureFin.toDate()).toLocaleString("fr-FR") : "—"); y += 2;
-    section("OBSERVATIONS");
-    const obsC = doc2.splitTextToSize("Cocon+ : " + (bon.obsCocon || "—"), 175);
-    doc2.text(obsC, ml, y); y += obsC.length * 5 + 3;
-    const obsCl = doc2.splitTextToSize("Client : " + (bon.obsClient || "—"), 175);
-    doc2.text(obsCl, ml, y); y += obsCl.length * 5 + 5;
-    section("SIGNATURES");
-    doc2.setFontSize(9); doc2.text("Collaborateur", ml, y); doc2.text("Client", ml + 90, y); y += 3;
-    if (bon.signatureTech) { try { doc2.addImage(bon.signatureTech, "PNG", ml, y, 80, 30); } catch(e){} }
-    else { doc2.setDrawColor(200,200,200); doc2.rect(ml, y, 80, 30); }
-    if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient, "PNG", ml + 90, y, 80, 30); } catch(e){} }
-    else { doc2.setDrawColor(200,200,200); doc2.rect(ml + 90, y, 80, 30); }
-    y += 40;
-    doc2.setFontSize(8); doc2.setTextColor(150,150,150);
-    doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, { align: "center" });
-
-    doc2.save("bon-" + bon.ref + ".pdf");
-  };
-
-  const statutColor = (s) => ({ "planifié":"#E1F5EE","en cours":"#FFF3CD","terminé":"#D4EDDA" }[s] || "#eee");
-  const statutText = (s) => ({ "planifié":"#085041","en cours":"#856404","terminé":"#155724" }[s] || "#333");
   const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
+  const statutColor = (s) => ({ "planifié":"#d4f0ea","en cours":"#e8c9b8","terminé":"#35B499" }[s] || "#eee");
+  const statutText = (s) => ({ "planifié":"#1a7a65","en cours":"#6b4a31","terminé":"white" }[s] || "#333");
 
   if (sigMode) return (
     <div className="container">
@@ -198,9 +262,21 @@ export default function TechDashboard({ user }) {
       </div>
 
       <div className="card">
-        <div className="card-title">Suivi temps réel</div>
+        <div className="card-title">Suivi</div>
         <div className="info-row"><span>Arrivée réelle</span><b>{fmt(selected.heureArrivee)}</b></div>
         <div className="info-row"><span>Fin intervention</span><b>{fmt(selected.heureFin)}</b></div>
+        {selected.heureArrivee && selected.heureFin && (
+          <div className="info-row">
+            <span>Durée</span>
+            <b style={{color:"#35B499"}}>{calcDuree(selected.heureArrivee, selected.heureFin)}</b>
+          </div>
+        )}
+        {selected.geoArrivee && (
+          <div className="info-row">
+            <span>Position arrivée</span>
+            <b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b>
+          </div>
+        )}
         <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
           {selected.statut === "planifié" && (
             <button className="btn-arrive" disabled={saving} onClick={arriver}>
@@ -209,7 +285,7 @@ export default function TechDashboard({ user }) {
           )}
           {selected.statut === "en cours" && (
             <button className="btn-finish" disabled={saving} onClick={terminer}>
-              ✅ Terminer le chantier
+              {saving ? "Finalisation…" : "✅ Terminer le chantier"}
             </button>
           )}
           {selected.statut === "terminé" && (
@@ -218,6 +294,9 @@ export default function TechDashboard({ user }) {
             </button>
           )}
         </div>
+        {emailStatus === "sent" && <p style={{color:"#35B499",fontSize:13,marginTop:8}}>✅ Email envoyé au client !</p>}
+        {emailStatus === "error" && <p style={{color:"#e74c3c",fontSize:13,marginTop:8}}>⚠️ Erreur envoi email.</p>}
+        {emailStatus === "sending" && <p style={{color:"#888",fontSize:13,marginTop:8}}>Envoi de l'email…</p>}
       </div>
 
       {selected.statut !== "planifié" && (
@@ -262,9 +341,9 @@ export default function TechDashboard({ user }) {
 
   return (
     <div className="container">
-      <div className="page-header"><h2>Mes interventions</h2></div>
+      <div className="page-header"><h2>Mes interventions du jour</h2></div>
       {bons.length === 0 ? (
-        <div className="empty-state">Aucun bon assigné pour l'instant.</div>
+        <div className="empty-state">Aucun bon assigné pour aujourd'hui.</div>
       ) : (
         bons.map(b => (
           <div key={b.id} className="bon-card" onClick={() => openBon(b)}>

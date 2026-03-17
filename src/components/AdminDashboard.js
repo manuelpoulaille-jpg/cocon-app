@@ -70,6 +70,13 @@ export default function AdminDashboard({ user }) {
   const st = (s) => ({ "planifié":"#1a7a65","en cours":"#6b4a31","terminé":"white" }[s] || "#333");
   const today = new Date().toISOString().split("T")[0];
   const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
+  const calcDuree = (arrivee, fin) => {
+    if (!arrivee || !fin) return "—";
+    const diff = fin.toDate() - arrivee.toDate();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
+  };
 
   const stats = {
     planifie: bons.filter(b => b.statut === "planifié").length,
@@ -192,6 +199,7 @@ export default function AdminDashboard({ user }) {
               <option value="">-- Sélectionner --</option>
               <option value="Dimitri">Dimitri</option>
               <option value="Georges">Georges</option>
+              <option value="Brayann">Brayann</option>
               <option value="Equipe">Equipe</option>
             </select>
           </div>
@@ -222,6 +230,12 @@ export default function AdminDashboard({ user }) {
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
         <div className="info-row"><span>Arrivée réelle</span><b>{fmt(selected.heureArrivee)}</b></div>
         <div className="info-row"><span>Fin</span><b>{fmt(selected.heureFin)}</b></div>
+        {selected.heureArrivee && selected.heureFin && (
+          <div className="info-row"><span>Durée</span><b style={{color:"#35B499"}}>{calcDuree(selected.heureArrivee, selected.heureFin)}</b></div>
+        )}
+        {selected.geoArrivee && (
+          <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
+        )}
       </div>
       <div className="card">
         <div className="card-title">Observations</div>
