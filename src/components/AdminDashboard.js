@@ -240,8 +240,7 @@ export default function AdminDashboard({ user }) {
                 <option value="">-- Sélectionner --</option>
                 <option value="Dimitri">Dimitri</option>
                 <option value="Georges">Georges</option>
-                <option value="Brayann">Brayann</option>
-                <option value="Equipe">Equipe</option>
+                  <option value="Equipe">Equipe</option>
               </select>
             </div>
           </div>
@@ -309,7 +308,6 @@ export default function AdminDashboard({ user }) {
             <select value={editForm.techId} onChange={e=>setEditForm({...editForm,techId:e.target.value})}>
               <option value="Dimitri">Dimitri</option>
               <option value="Georges">Georges</option>
-              <option value="Brayann">Brayann</option>
               <option value="Equipe">Equipe</option>
             </select>
           </div>
