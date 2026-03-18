@@ -20,7 +20,7 @@ export default function AdminDashboard({ user }) {
   const [form, setForm] = useState({
     clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
     adresseFacturation:"", adresseIntervention:"",
-    demandeClient:"", numDevis:"",
+    demandeClient:"", numDevis:"", signataire:"",
     types:[], datePrevue:"", heurePrevue:"", techId:""
   });
 
@@ -48,6 +48,7 @@ export default function AdminDashboard({ user }) {
     await addDoc(collection(db, "bons"), {
       ...form,
       clientAdresse: form.adresseIntervention,
+      signataire: form.signataire,
       type: form.types.join(", "),
       techNom: form.techId,
       ref: refNum(),
@@ -86,6 +87,7 @@ export default function AdminDashboard({ user }) {
       clientAdresse: editForm.adresseIntervention,
       demandeClient: editForm.demandeClient,
       numDevis: editForm.numDevis,
+      signataire: editForm.signataire||"",
       datePrevue: editForm.datePrevue,
       heurePrevue: editForm.heurePrevue,
       techNom: editForm.techId,
@@ -244,6 +246,7 @@ export default function AdminDashboard({ user }) {
           </div>
           <div className="field"><label>Adresse de facturation</label><input value={form.adresseFacturation} onChange={e=>setForm({...form,adresseFacturation:e.target.value})} placeholder="Adresse de facturation" /></div>
           <div className="field"><label>Adresse d'intervention</label><input required value={form.adresseIntervention} onChange={e=>setForm({...form,adresseIntervention:e.target.value})} placeholder="Adresse du chantier" /></div>
+          <div className="field"><label>Signataire si différent du client</label><input value={form.signataire} onChange={e=>setForm({...form,signataire:e.target.value})} placeholder="Nom du signataire" /></div>
         </div>
 
         <div className="card">
@@ -311,6 +314,7 @@ export default function AdminDashboard({ user }) {
         </div>
         <div className="field"><label>Adresse facturation</label><input value={editForm.adresseFacturation} onChange={e=>setEditForm({...editForm,adresseFacturation:e.target.value})} /></div>
         <div className="field"><label>Adresse intervention</label><input value={editForm.adresseIntervention} onChange={e=>setEditForm({...editForm,adresseIntervention:e.target.value})} /></div>
+        <div className="field"><label>Signataire si différent du client</label><input value={editForm.signataire||""} onChange={e=>setEditForm({...editForm,signataire:e.target.value})} /></div>
       </div>
       <div className="card">
         <div className="card-title">Demande client</div>
@@ -349,7 +353,7 @@ export default function AdminDashboard({ user }) {
         <h2>{selected.ref}</h2>
         <span className="badge" style={{background:sc(selected.statut),color:st(selected.statut)}}>{selected.statut}</span>
         {selected.statut === "planifié" && !editMode && (
-          <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={() => { setEditForm({ clientNom:selected.clientNom, clientPrenom:selected.clientPrenom, clientTel:selected.clientTel, clientEmail:selected.clientEmail, adresseFacturation:selected.adresseFacturation||"" , adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"", demandeClient:selected.demandeClient||"", numDevis:selected.numDevis||"", datePrevue:selected.datePrevue, heurePrevue:selected.heurePrevue, techId:selected.techNom, types:selected.types||[] }); setEditMode(true); }}>Modifier</button>
+          <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={() => { setEditForm({ clientNom:selected.clientNom, clientPrenom:selected.clientPrenom, clientTel:selected.clientTel, clientEmail:selected.clientEmail, adresseFacturation:selected.adresseFacturation||"" , adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"", demandeClient:selected.demandeClient||"", numDevis:selected.numDevis||"", signataire:selected.signataire||"", datePrevue:selected.datePrevue, heurePrevue:selected.heurePrevue, techId:selected.techNom, types:selected.types||[] }); setEditMode(true); }}>Modifier</button>
         )}
         <button style={{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12,marginLeft:"auto"}} onClick={() => setConfirmDelete(true)}>Supprimer</button>
       </div>
@@ -367,6 +371,7 @@ export default function AdminDashboard({ user }) {
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
+        {selected.signataire && <div className="info-row"><span>Signataire</span><b>{selected.signataire}</b></div>}
         <div className="info-row"><span>Adresse facturation</span><b>{selected.adresseFacturation || "—"}</b></div>
         <div className="info-row"><span>Adresse intervention</span><b>{selected.adresseIntervention || selected.clientAdresse || "—"}</b></div>
       </div>

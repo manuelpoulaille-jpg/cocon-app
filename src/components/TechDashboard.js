@@ -139,6 +139,7 @@ export default function TechDashboard({ user }) {
     section("INTERVENTION");
     row("Type", bon.type);
     row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
+    if (bon.signataire) row("Signataire", bon.signataire);
     row("Arrivée réelle", fmt(bon.heureArrivee));
     row("Fin intervention", fmt(bon.heureFin));
     row("Durée", calcDuree(bon.heureArrivee, bon.heureFin));
@@ -178,6 +179,7 @@ export default function TechDashboard({ user }) {
         collaborateur: bon.techNom,
         adresse: bon.adresseIntervention || bon.clientAdresse || "",
         observations: bon.obsCocon || "—",
+        signataire: bon.signataire || "",
         signature_tech: bon.signatureTech || "",
         signature_client: bon.signatureClient || "",
       }, EMAILJS_KEY);
