@@ -53,7 +53,7 @@ export default function App() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <div className="logo-circle-lg">C+</div>
+          <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain",marginBottom:4,background:"white",borderRadius:12,padding:"4px 8px"}} />
           <h1>Cocon+</h1>
           <p>La maison protégée</p>
         </div>
