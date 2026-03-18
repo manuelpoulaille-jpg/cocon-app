@@ -18,6 +18,7 @@ export default function TechDashboard({ user }) {
   const [sigMode, setSigMode] = useState(null);
   const [sigTech, setSigTech] = useState(null);
   const [sigClient, setSigClient] = useState(null);
+  const [signataireNom, setSignataireNom] = useState("");
   const [emailStatus, setEmailStatus] = useState("");
   const canvasRef = useRef(null);
   const drawing = useRef(false);
@@ -41,6 +42,7 @@ export default function TechDashboard({ user }) {
     setObsClient(b.obsClient || "");
     setSigTech(b.signatureTech || null);
     setSigClient(b.signatureClient || null);
+    setSignataireNom(b.signataire || "");
     setEmailStatus("");
     setView("bon");
   };
@@ -88,7 +90,8 @@ export default function TechDashboard({ user }) {
       obsClient,
       signatureTech: sigTech,
       signatureClient: sigClient,
-      geoFin: geo
+      geoFin: geo,
+      signataire: signataireNom || selected.signataire || ""
     };
     await updateDoc(doc(db, "bons", selected.id), bonData);
     const fullBon = { ...selected, ...bonData };
@@ -103,7 +106,7 @@ export default function TechDashboard({ user }) {
 
   const sauvegarder = async () => {
     setSaving(true);
-    await updateDoc(doc(db, "bons", selected.id), { obsCocon, obsClient, signatureTech: sigTech, signatureClient: sigClient });
+    await updateDoc(doc(db, "bons", selected.id), { obsCocon, obsClient, signatureTech: sigTech, signatureClient: sigClient, signataire: signataireNom });
     setSaving(false);
   };
 
@@ -333,6 +336,15 @@ export default function TechDashboard({ user }) {
               </div>
               <div>
                 <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
+                {selected.statut !== "terminé" && (
+                  <input
+                    type="text"
+                    placeholder={selected.clientNom + " " + selected.clientPrenom}
+                    value={signataireNom}
+                    onChange={e => setSignataireNom(e.target.value)}
+                    style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,marginBottom:6,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
+                  />
+                )}
                 {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
               </div>
