@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, getDocs, query, orderBy, Timestamp, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import logoBase64 from "../logoBase64";
 
 const TYPES = [
   "Désinsectisation","Dératisation","Traitement anti-termites",
@@ -12,6 +13,7 @@ export default function AdminDashboard({ user }) {
   const [view, setView] = useState("dashboard");
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({});
@@ -118,13 +120,14 @@ export default function AdminDashboard({ user }) {
     const { jsPDF } = await import("jspdf");
     const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const W = 210, ml = 15, mr = 195;
+    try { doc2.addImage(logoBase64, "PNG", ml, 5, 28, 22); } catch(e) {}
     doc2.setFillColor(53, 180, 153);
-    doc2.rect(0, 0, W, 28, "F");
+    doc2.rect(45, 0, W - 45, 28, "F");
     doc2.setTextColor(255,255,255);
     doc2.setFontSize(16); doc2.setFont("helvetica","bold");
-    doc2.text("BON D'INTERVENTION", ml, 12);
+    doc2.text("BON D'INTERVENTION", 50, 12);
     doc2.setFontSize(9); doc2.setFont("helvetica","normal");
-    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", ml, 20);
+    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", 50, 20);
     doc2.text("N° " + bon.ref, mr, 12, { align:"right" });
     doc2.text("Le " + new Date().toLocaleDateString("fr-FR"), mr, 20, { align:"right" });
     let y = 35;
@@ -197,13 +200,23 @@ export default function AdminDashboard({ user }) {
 
   const filteredBons = bons.filter(b => {
     const q = search.toLowerCase();
-    return !q ||
+    const matchSearch = !q ||
       (b.clientNom + " " + b.clientPrenom).toLowerCase().includes(q) ||
       b.ref?.toLowerCase().includes(q) ||
       b.numDevis?.toLowerCase().includes(q) ||
       b.type?.toLowerCase().includes(q) ||
       b.techNom?.toLowerCase().includes(q) ||
       b.statut?.toLowerCase().includes(q);
+    const now = new Date();
+    const start = new Date(now); start.setDate(now.getDate() - now.getDay());
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    const matchFilter = !filter ||
+      (filter === "planifié" && b.statut === "planifié") ||
+      (filter === "en cours" && b.statut === "en cours") ||
+      (filter === "terminé" && b.statut === "terminé") ||
+      (filter === "aujourdhui" && b.datePrevue === today) ||
+      (filter === "semaine" && new Date(b.datePrevue) >= start && new Date(b.datePrevue) <= end);
+    return matchSearch && matchFilter;
   });
 
   if (view === "new") return (
@@ -428,6 +441,13 @@ export default function AdminDashboard({ user }) {
         <h2>Tous les bons</h2>
         <button className="btn-primary sm" onClick={() => setView("new")}>+ Nouveau</button>
       </div>
+      {filter && (
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <span style={{fontSize:12,color:"#888"}}>Filtre actif :</span>
+          <span style={{background:"#35B499",color:"white",fontSize:12,padding:"3px 10px",borderRadius:20}}>{filter}</span>
+          <button onClick={() => setFilter("")} style={{background:"transparent",border:"none",color:"#888",cursor:"pointer",fontSize:12}}>✕ Effacer</button>
+        </div>
+      )}
       <div className="search-bar">
         <input type="text" placeholder="Rechercher par client, référence, devis, type…" value={search} onChange={e => setSearch(e.target.value)} style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e0e0e0",borderRadius:10,background:"white"}} />
         {search && <span className="search-count">{filteredBons.length} résultat{filteredBons.length > 1 ? "s" : ""}</span>}
@@ -445,11 +465,11 @@ export default function AdminDashboard({ user }) {
         <img src="/logo.png" alt="Cocon+" style={{height:80,objectFit:"contain",borderRadius:16,background:"white",padding:8,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}} />
       </div>
       <div className="stats-grid">
-        <div className="stat-card" style={{background:"#d4f0ea"}}><div className="stat-num" style={{color:"#1a7a65"}}>{stats.planifie}</div><div className="stat-label" style={{color:"#1a7a65"}}>Planifiés</div></div>
-        <div className="stat-card" style={{background:"#e8c9b8"}}><div className="stat-num" style={{color:"#6b4a31"}}>{stats.enCours}</div><div className="stat-label" style={{color:"#6b4a31"}}>En cours</div></div>
-        <div className="stat-card" style={{background:"#35B499"}}><div className="stat-num" style={{color:"white"}}>{stats.termine}</div><div className="stat-label" style={{color:"white"}}>Terminés</div></div>
-        <div className="stat-card" style={{background:"#8B6A4E"}}><div className="stat-num" style={{color:"white"}}>{stats.aujourdhui}</div><div className="stat-label" style={{color:"white"}}>Aujourd'hui</div></div>
-        <div className="stat-card" style={{background:"#2a9a82"}}><div className="stat-num" style={{color:"white"}}>{stats.semaine}</div><div className="stat-label" style={{color:"white"}}>Cette semaine</div></div>
+        <div className="stat-card" style={{background:"#d4f0ea",cursor:"pointer",outline:filter==="planifié" ? "3px solid #1a7a65" : "none"}} onClick={() => { setFilter(f => f==="planifié" ? "" : "planifié"); setView("list"); }}><div className="stat-num" style={{color:"#1a7a65"}}>{stats.planifie}</div><div className="stat-label" style={{color:"#1a7a65"}}>Planifiés</div></div>
+        <div className="stat-card" style={{background:"#e8c9b8",cursor:"pointer",outline:filter==="en cours" ? "3px solid #6b4a31" : "none"}} onClick={() => { setFilter(f => f==="en cours" ? "" : "en cours"); setView("list"); }}><div className="stat-num" style={{color:"#6b4a31"}}>{stats.enCours}</div><div className="stat-label" style={{color:"#6b4a31"}}>En cours</div></div>
+        <div className="stat-card" style={{background:"#35B499",cursor:"pointer",outline:filter==="terminé" ? "3px solid white" : "none"}} onClick={() => { setFilter(f => f==="terminé" ? "" : "terminé"); setView("list"); }}><div className="stat-num" style={{color:"white"}}>{stats.termine}</div><div className="stat-label" style={{color:"white"}}>Terminés</div></div>
+        <div className="stat-card" style={{background:"#8B6A4E",cursor:"pointer",outline:filter==="aujourdhui" ? "3px solid white" : "none"}} onClick={() => { setFilter(f => f==="aujourdhui" ? "" : "aujourdhui"); setView("list"); }}><div className="stat-num" style={{color:"white"}}>{stats.aujourdhui}</div><div className="stat-label" style={{color:"white"}}>Aujourd'hui</div></div>
+        <div className="stat-card" style={{background:"#2a9a82",cursor:"pointer",outline:filter==="semaine" ? "3px solid white" : "none"}} onClick={() => { setFilter(f => f==="semaine" ? "" : "semaine"); setView("list"); }}><div className="stat-num" style={{color:"white"}}>{stats.semaine}</div><div className="stat-label" style={{color:"white"}}>Cette semaine</div></div>
       </div>
       <div className="dash-actions">
         <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon</button>

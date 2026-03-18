@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
 import { collection, query, where, getDocs, doc, updateDoc, Timestamp } from "firebase/firestore";
 import emailjs from "@emailjs/browser";
+import logoBase64 from "../logoBase64";
 
 const EMAILJS_SERVICE = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
@@ -112,13 +113,14 @@ export default function TechDashboard({ user }) {
     const W = 210, ml = 15, mr = 195;
     const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
 
+    try { doc2.addImage(logoBase64, "PNG", ml, 5, 28, 22); } catch(e) {}
     doc2.setFillColor(53, 180, 153);
-    doc2.rect(0, 0, W, 28, "F");
+    doc2.rect(45, 0, W - 45, 28, "F");
     doc2.setTextColor(255,255,255);
     doc2.setFontSize(16); doc2.setFont("helvetica","bold");
-    doc2.text("BON D'INTERVENTION", ml, 12);
+    doc2.text("BON D'INTERVENTION", 50, 12);
     doc2.setFontSize(9); doc2.setFont("helvetica","normal");
-    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", ml, 20);
+    doc2.text("Cocon+ — 0596 73 66 66 | www.cocon-plus.fr", 50, 20);
     doc2.text("N° " + bon.ref, mr, 12, { align:"right" });
     doc2.text("Le " + new Date().toLocaleDateString("fr-FR"), mr, 20, { align:"right" });
 
@@ -170,6 +172,13 @@ export default function TechDashboard({ user }) {
       await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
         to_email: bon.clientEmail,
         client_nom: bon.clientNom + " " + bon.clientPrenom,
+        client_tel: bon.clientTel || "—",
+        client_email: bon.clientEmail || "—",
+        adresse_facturation: bon.adresseFacturation || "—",
+        adresse_intervention: bon.adresseIntervention || bon.clientAdresse || "—",
+        signataire: bon.signataire || "Client",
+        demande_client: bon.demandeClient || "—",
+        num_devis: bon.numDevis || "—",
         ref: bon.ref,
         type: bon.type,
         date_prevue: bon.datePrevue,
@@ -177,9 +186,8 @@ export default function TechDashboard({ user }) {
         heure_arrivee: fmt(bon.heureArrivee),
         heure_fin: fmt(bon.heureFin),
         collaborateur: bon.techNom,
-        adresse: bon.adresseIntervention || bon.clientAdresse || "",
-        observations: bon.obsCocon || "—",
-        signataire: bon.signataire || "",
+        observations_cocon: bon.obsCocon || "—",
+        observations_client: bon.obsClient || "—",
         signature_tech: bon.signatureTech || "",
         signature_client: bon.signatureClient || "",
       }, EMAILJS_KEY);
