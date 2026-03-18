@@ -20,6 +20,7 @@ export default function TechDashboard({ user }) {
   const [sigClient, setSigClient] = useState(null);
   const [signataireNom, setSignataireNom] = useState("");
   const [emailStatus, setEmailStatus] = useState("");
+  const [showSuccess, setShowSuccess] = useState(false);
   const canvasRef = useRef(null);
   const drawing = useRef(false);
 
@@ -42,7 +43,7 @@ export default function TechDashboard({ user }) {
     setObsClient(b.obsClient || "");
     setSigTech(b.signatureTech || null);
     setSigClient(b.signatureClient || null);
-    setSignataireNom(b.signataire || "");
+    setSignataireNom(b.signataire || b.clientNom + " " + b.clientPrenom);
     setEmailStatus("");
     setView("bon");
   };
@@ -102,6 +103,7 @@ export default function TechDashboard({ user }) {
       await sendEmail(fullBon);
     }
     setSaving(false);
+    setShowSuccess(true);
   };
 
   const sauvegarder = async () => {
@@ -201,6 +203,26 @@ export default function TechDashboard({ user }) {
       setEmailStatus("error: " + (e?.text || e?.message || JSON.stringify(e)));
     }
   };
+
+  if (showSuccess) return (
+    <div className="container" style={{textAlign:"center",paddingTop:"3rem"}}>
+      <div style={{width:80,height:80,borderRadius:"50%",background:"#35B499",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1.5rem",fontSize:36}}>✓</div>
+      <h2 style={{color:"#35B499",marginBottom:8}}>Intervention terminée !</h2>
+      <p style={{color:"var(--color-text-secondary)",fontSize:14,marginBottom:8}}>Le bon a été enregistré avec succès.</p>
+      {emailStatus === "sent" && (
+        <p style={{color:"#35B499",fontSize:14,marginBottom:24}}>✉️ Email envoyé au client</p>
+      )}
+      {emailStatus.startsWith("error") && (
+        <p style={{color:"#e74c3c",fontSize:13,marginBottom:24}}>⚠️ Erreur envoi email — le bon est bien enregistré</p>
+      )}
+      {!selected.clientEmail && (
+        <p style={{color:"#888",fontSize:13,marginBottom:24}}>Aucun email client renseigné</p>
+      )}
+      <button className="btn-primary" onClick={() => { setShowSuccess(false); setView("list"); }}>
+        Retour à mes interventions
+      </button>
+    </div>
+  );
 
   const startSig = (mode) => {
     setSigMode(mode);
@@ -337,13 +359,19 @@ export default function TechDashboard({ user }) {
               <div>
                 <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
                 {selected.statut !== "terminé" && (
-                  <input
-                    type="text"
-                    placeholder={selected.clientNom + " " + selected.clientPrenom}
-                    value={signataireNom}
-                    onChange={e => setSignataireNom(e.target.value)}
-                    style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,marginBottom:6,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
-                  />
+                  <div style={{marginBottom:6}}>
+                    <label style={{fontSize:11,color:"var(--color-text-secondary)",display:"block",marginBottom:3}}>Nom du signataire</label>
+                    <input
+                      type="text"
+                      placeholder={selected.clientNom + " " + selected.clientPrenom}
+                      value={signataireNom || selected.clientNom + " " + selected.clientPrenom}
+                      onChange={e => setSignataireNom(e.target.value)}
+                      style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
+                    />
+                  </div>
+                )}
+                {selected.statut === "terminé" && selected.signataire && (
+                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>
                 )}
                 {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
@@ -357,9 +385,16 @@ export default function TechDashboard({ user }) {
             </button>
           )}
           {selected.statut === "en cours" && (
-            <button className="btn-finish" style={{width:"100%"}} disabled={saving} onClick={terminer}>
-              {saving ? "Finalisation…" : "✅ Terminer le chantier"}
-            </button>
+            <div>
+              {(!sigTech || !sigClient) && (
+                <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>
+                  ⚠️ Les deux signatures sont requises pour terminer
+                </p>
+              )}
+              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech || !sigClient) ? 0.4 : 1}} disabled={saving || !sigTech || !sigClient} onClick={terminer}>
+                {saving ? "Finalisation…" : "✅ Terminer le chantier"}
+              </button>
+            </div>
           )}
         </>
       )}
