@@ -24,7 +24,7 @@ export default function TechDashboard({ user }) {
   useEffect(() => { fetchBons(); }, []);
 
   const fetchBons = async () => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
     const snap = await getDocs(collection(db, "bons"));
     const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     const filtered = all.filter(b => 

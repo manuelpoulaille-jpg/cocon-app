@@ -13,6 +13,8 @@ export default function AdminDashboard({ user }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({
@@ -72,9 +74,34 @@ export default function AdminDashboard({ user }) {
     fetchBons();
   };
 
+  const saveEdit = async () => {
+    setSaving(true);
+    await updateDoc(doc(db, "bons", selected.id), {
+      clientNom: editForm.clientNom,
+      clientPrenom: editForm.clientPrenom,
+      clientTel: editForm.clientTel,
+      clientEmail: editForm.clientEmail,
+      adresseFacturation: editForm.adresseFacturation,
+      adresseIntervention: editForm.adresseIntervention,
+      clientAdresse: editForm.adresseIntervention,
+      demandeClient: editForm.demandeClient,
+      numDevis: editForm.numDevis,
+      datePrevue: editForm.datePrevue,
+      heurePrevue: editForm.heurePrevue,
+      techNom: editForm.techId,
+      types: editForm.types,
+      type: editForm.types.join(", "),
+    });
+    const updated = { ...selected, ...editForm, techNom: editForm.techId, type: editForm.types.join(", ") };
+    setSelected(updated);
+    setEditMode(false);
+    fetchBons();
+    setSaving(false);
+  };
+
   const sc = (s) => ({ "planifié":"#d4f0ea","en cours":"#e8c9b8","terminé":"#35B499" }[s] || "#eee");
   const st = (s) => ({ "planifié":"#1a7a65","en cours":"#6b4a31","terminé":"white" }[s] || "#333");
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
   const fmt = (ts) => ts ? new Date(ts.toDate()).toLocaleString("fr-FR") : "—";
 
   const calcDuree = (arrivee, fin) => {
@@ -248,6 +275,63 @@ export default function AdminDashboard({ user }) {
     </div>
   );
 
+  if (view === "detail" && selected && editMode) return (
+    <div className="container">
+      <div className="page-header">
+        <button className="btn-back" onClick={() => setEditMode(false)}>← Annuler</button>
+        <h2>Modifier — {selected.ref}</h2>
+      </div>
+      <div className="card">
+        <div className="card-title">Informations générales</div>
+        <div className="row2">
+          <div className="field"><label>N° Devis</label><input value={editForm.numDevis} onChange={e=>setEditForm({...editForm,numDevis:e.target.value})} /></div>
+          <div className="field"><label>Date prévue</label><input type="date" value={editForm.datePrevue} onChange={e=>setEditForm({...editForm,datePrevue:e.target.value})} /></div>
+        </div>
+        <div className="row2">
+          <div className="field"><label>Heure prévue</label><input type="time" value={editForm.heurePrevue} onChange={e=>setEditForm({...editForm,heurePrevue:e.target.value})} /></div>
+          <div className="field"><label>Collaborateur</label>
+            <select value={editForm.techId} onChange={e=>setEditForm({...editForm,techId:e.target.value})}>
+              <option value="Dimitri">Dimitri</option>
+              <option value="Georges">Georges</option>
+              <option value="Brayann">Brayann</option>
+              <option value="Equipe">Equipe</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-title">Client</div>
+        <div className="row2">
+          <div className="field"><label>Nom</label><input value={editForm.clientNom} onChange={e=>setEditForm({...editForm,clientNom:e.target.value})} /></div>
+          <div className="field"><label>Prénom</label><input value={editForm.clientPrenom} onChange={e=>setEditForm({...editForm,clientPrenom:e.target.value})} /></div>
+        </div>
+        <div className="row2">
+          <div className="field"><label>Téléphone</label><input value={editForm.clientTel} onChange={e=>setEditForm({...editForm,clientTel:e.target.value})} /></div>
+          <div className="field"><label>Email</label><input value={editForm.clientEmail} onChange={e=>setEditForm({...editForm,clientEmail:e.target.value})} /></div>
+        </div>
+        <div className="field"><label>Adresse facturation</label><input value={editForm.adresseFacturation} onChange={e=>setEditForm({...editForm,adresseFacturation:e.target.value})} /></div>
+        <div className="field"><label>Adresse intervention</label><input value={editForm.adresseIntervention} onChange={e=>setEditForm({...editForm,adresseIntervention:e.target.value})} /></div>
+      </div>
+      <div className="card">
+        <div className="card-title">Demande client</div>
+        <div className="field"><textarea value={editForm.demandeClient} onChange={e=>setEditForm({...editForm,demandeClient:e.target.value})} /></div>
+      </div>
+      <div className="card">
+        <div className="card-title">Type(s) d'intervention</div>
+        <div className="types-grid">
+          {TYPES.map(t => (
+            <button key={t} type="button"
+              className={"type-btn" + (editForm.types.includes(t) ? " active" : "")}
+              onClick={() => setEditForm(f => ({ ...f, types: f.types.includes(t) ? f.types.filter(x=>x!==t) : [...f.types,t] }))}>
+              {editForm.types.includes(t) ? "✓ " : ""}{t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button className="btn-primary" disabled={saving} onClick={saveEdit}>{saving ? "Sauvegarde…" : "Enregistrer les modifications"}</button>
+    </div>
+  );
+
   if (view === "detail" && selected) return (
     <div className="container">
       {confirmDelete && (
@@ -264,6 +348,9 @@ export default function AdminDashboard({ user }) {
         <button className="btn-back" onClick={() => { setView("list"); setSelected(null); setConfirmDelete(false); }}>← Retour</button>
         <h2>{selected.ref}</h2>
         <span className="badge" style={{background:sc(selected.statut),color:st(selected.statut)}}>{selected.statut}</span>
+        {selected.statut === "planifié" && !editMode && (
+          <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={() => { setEditForm({ clientNom:selected.clientNom, clientPrenom:selected.clientPrenom, clientTel:selected.clientTel, clientEmail:selected.clientEmail, adresseFacturation:selected.adresseFacturation||"" , adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"", demandeClient:selected.demandeClient||"", numDevis:selected.numDevis||"", datePrevue:selected.datePrevue, heurePrevue:selected.heurePrevue, techId:selected.techNom, types:selected.types||[] }); setEditMode(true); }}>Modifier</button>
+        )}
         <button style={{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12,marginLeft:"auto"}} onClick={() => setConfirmDelete(true)}>Supprimer</button>
       </div>
 
