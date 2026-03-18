@@ -1,0 +1,24 @@
+{
+  "name": "Cocon+ Interventions",
+  "short_name": "Cocon+",
+  "description": "Application de gestion des bons d'intervention Cocon Plus",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#35B499",
+  "theme_color": "#35B499",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
