@@ -166,8 +166,6 @@ export default function TechDashboard({ user }) {
     const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
     setEmailStatus("sending");
     try {
-      const pdfBase64 = await generatePDF(bon, false);
-      const base64Content = pdfBase64.split(",")[1];
       await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
         to_email: bon.clientEmail,
         client_nom: bon.clientNom + " " + bon.clientPrenom,
@@ -178,10 +176,10 @@ export default function TechDashboard({ user }) {
         heure_arrivee: fmt(bon.heureArrivee),
         heure_fin: fmt(bon.heureFin),
         collaborateur: bon.techNom,
-        adresse: bon.clientAdresse,
+        adresse: bon.adresseIntervention || bon.clientAdresse || "",
         observations: bon.obsCocon || "—",
-        attachment: base64Content,
-        attachment_name: "bon-" + bon.ref + ".pdf",
+        signature_tech: bon.signatureTech || "",
+        signature_client: bon.signatureClient || "",
       }, EMAILJS_KEY);
       setEmailStatus("sent");
       await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
@@ -214,7 +212,14 @@ export default function TechDashboard({ user }) {
 
   const saveSig = () => {
     const canvas = canvasRef.current;
-    const data = canvas.toDataURL("image/png");
+    const compressed = document.createElement("canvas");
+    compressed.width = 280;
+    compressed.height = 100;
+    const ctx2 = compressed.getContext("2d");
+    ctx2.fillStyle = "white";
+    ctx2.fillRect(0, 0, 280, 100);
+    ctx2.drawImage(canvas, 0, 0, 280, 100);
+    const data = compressed.toDataURL("image/jpeg", 0.3);
     if (sigMode === "tech") setSigTech(data);
     else setSigClient(data);
     setSigMode(null);
