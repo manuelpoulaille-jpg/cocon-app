@@ -21,6 +21,8 @@ export default function TechDashboard({ user }) {
   const [signataireNom, setSignataireNom] = useState("");
   const [emailStatus, setEmailStatus] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(false);
+  const [checklist, setChecklist] = useState({});
   const canvasRef = useRef(null);
   const drawing = useRef(false);
 
@@ -92,7 +94,8 @@ export default function TechDashboard({ user }) {
       signatureTech: sigTech,
       signatureClient: sigClient,
       geoFin: geo,
-      signataire: signataireNom || selected.signataire || ""
+      signataire: signataireNom || selected.signataire || "",
+      checklist: checklist
     };
     await updateDoc(doc(db, "bons", selected.id), bonData);
     const fullBon = { ...selected, ...bonData };
@@ -203,6 +206,55 @@ export default function TechDashboard({ user }) {
       setEmailStatus("error: " + (e?.text || e?.message || JSON.stringify(e)));
     }
   };
+
+  const CHECKLIST = [
+    { id: "nettoyage", label: "Nettoyage du chantier effectué", required: true },
+    { id: "outils", label: "Outils et matériel récupérés", required: true },
+    { id: "produits", label: "Produits utilisés rangés / sécurisés", required: true },
+    { id: "consignes", label: "Client informé des consignes post-intervention", required: true },
+    { id: "photos", label: "Photos prises", required: false },
+    { id: "signature", label: "Bon signé par le client", required: true },
+  ];
+
+  const checklistValid = CHECKLIST.filter(i => i.required).every(i => checklist[i.id]);
+
+  if (showChecklist) return (
+    <div className="container">
+      <div className="page-header">
+        <button className="btn-back" onClick={() => setShowChecklist(false)}>← Retour</button>
+        <h2>Checklist de fin</h2>
+      </div>
+      <div className="card">
+        <div className="card-title">Vérifications avant clôture</div>
+        <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:"1rem"}}>
+          <div style={{height:4,background:"#35B499",borderRadius:2,width:(Object.values(checklist).filter(Boolean).length / CHECKLIST.length * 100) + "%",transition:"width .3s"}} />
+        </div>
+        {CHECKLIST.map(item => (
+          <div key={item.id} onClick={() => setChecklist(c => ({...c, [item.id]: !c[item.id]}))}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+            <div style={{width:24,height:24,borderRadius:6,border:"2px solid #35B499",background:checklist[item.id] ? "#35B499" : "transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+              {checklist[item.id] && <span style={{color:"white",fontSize:13,fontWeight:"bold"}}>✓</span>}
+            </div>
+            <span style={{fontSize:14,color:checklist[item.id] ? "var(--color-text-secondary)" : "var(--color-text-primary)",textDecoration:checklist[item.id] ? "line-through" : "none",flex:1}}>
+              {item.label}
+            </span>
+            {!item.required && <span style={{fontSize:10,color:"#888",background:"var(--color-background-secondary)",padding:"2px 8px",borderRadius:20,flexShrink:0}}>Optionnel</span>}
+          </div>
+        ))}
+        <p style={{fontSize:12,color:"var(--color-text-secondary)",marginTop:"1rem",fontStyle:"italic"}}>
+          Les points obligatoires doivent être cochés pour terminer.
+        </p>
+      </div>
+      {!checklistValid && (
+        <p style={{color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:8}}>
+          ⚠️ Veuillez cocher tous les points obligatoires
+        </p>
+      )}
+      <button className="btn-finish" style={{width:"100%",opacity:checklistValid ? 1 : 0.4}} disabled={saving || !checklistValid} onClick={terminer}>
+        {saving ? "Finalisation…" : "✅ Terminer le chantier"}
+      </button>
+    </div>
+  );
 
   if (showSuccess) return (
     <div className="container" style={{textAlign:"center",paddingTop:"3rem"}}>
@@ -388,11 +440,11 @@ export default function TechDashboard({ user }) {
             <div>
               {(!sigTech || !sigClient) && (
                 <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>
-                  ⚠️ Les deux signatures sont requises pour terminer
+                  ⚠️ Les deux signatures sont requises pour continuer
                 </p>
               )}
-              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech || !sigClient) ? 0.4 : 1}} disabled={saving || !sigTech || !sigClient} onClick={terminer}>
-                {saving ? "Finalisation…" : "✅ Terminer le chantier"}
+              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech || !sigClient) ? 0.4 : 1}} disabled={!sigTech || !sigClient} onClick={() => { sauvegarder(); setShowChecklist(true); }}>
+                Valider la checklist →
               </button>
             </div>
           )}
