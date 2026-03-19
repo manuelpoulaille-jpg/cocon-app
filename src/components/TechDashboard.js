@@ -106,6 +106,7 @@ export default function TechDashboard({ user }) {
       await sendEmail(fullBon);
     }
     setSaving(false);
+    setShowChecklist(false);
     setShowSuccess(true);
   };
 
@@ -222,7 +223,7 @@ export default function TechDashboard({ user }) {
     <div className="container">
       <div className="page-header">
         <button className="btn-back" onClick={() => setShowChecklist(false)}>← Retour</button>
-        <h2>Checklist de fin</h2>
+        <h2>Checklist de fin de chantier</h2>
       </div>
       <div className="card">
         <div className="card-title">Vérifications avant clôture</div>
@@ -354,6 +355,13 @@ export default function TechDashboard({ user }) {
         <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
       </div>
+
+      {selected.demandeClient && (
+        <div className="card readonly">
+          <div className="card-title">Demande client <span className="locked-badge">🔒 Admin</span></div>
+          <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6}}>{selected.demandeClient}</p>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-title">Suivi</div>

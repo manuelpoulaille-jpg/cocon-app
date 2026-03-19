@@ -53,7 +53,7 @@ export default function AdminDashboard({ user }) {
       signataire: form.signataire,
       type: form.types.join(", "),
       techNom: form.techId,
-      ref: refNum(),
+      ref: form.numDevis ? "INT-" + form.numDevis.replace(/\D/g, "").slice(-5) : refNum(),
       statut: "planifié",
       createdAt: Timestamp.now(),
       createdBy: user.uid,
@@ -470,7 +470,7 @@ export default function AdminDashboard({ user }) {
         <div className="stat-card" style={{background:"#2a9a82",cursor:"pointer",outline:filter==="semaine" ? "3px solid white" : "none"}} onClick={() => { setFilter(f => f==="semaine" ? "" : "semaine"); setView("list"); }}><div className="stat-num" style={{color:"white"}}>{stats.semaine}</div><div className="stat-label" style={{color:"white"}}>Cette semaine</div></div>
       </div>
       <div className="dash-actions">
-        <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon</button>
+        <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon d'intervention</button>
         <button className="btn-outline" onClick={() => setView("list")}>Tous les bons</button>
       </div>
       <div className="card" style={{marginTop:"1rem"}}>
