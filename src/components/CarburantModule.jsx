@@ -2,10 +2,6 @@
 // CarburantModule.jsx — Suivi Carburant pour Cocon+
 // À placer dans : src/components/CarburantModule.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// INTÉGRATION DANS LE ROUTER / MENU :
-//   import CarburantModule from "./components/CarburantModule";
-//   <Route path="/carburant" element={<CarburantModule user={currentUser} />} />
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect } from "react";
 import {
@@ -16,10 +12,10 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase"; // ← adapter si votre fichier firebase est ailleurs
+import { db } from "../firebase"; // ← adapter si nécessaire
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ⚙️  CONFIGURATION — modifier ici selon vos besoins
+// ⚙️  CONFIGURATION
 // ══════════════════════════════════════════════════════════════════════════════
 const BUDGET_MENSUEL_EUROS = 300; // 👈 MODIFIEZ CETTE VALEUR
 // ══════════════════════════════════════════════════════════════════════════════
@@ -48,10 +44,13 @@ function StatCard({ icon, titre, valeur, sous }) {
   );
 }
 
-function Field({ label, error, children }) {
+function Field({ label, error, hint, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>{label}</label>
+      <label style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>
+        {label}
+        {hint && <span style={{ fontWeight: 400, color: GRAY, marginLeft: 6, fontSize: 12 }}>{hint}</span>}
+      </label>
       {children}
       {error && <span style={{ fontSize: 11, color: ORANGE }}>{error}</span>}
     </div>
@@ -66,7 +65,7 @@ function PleinRow({ plein }) {
       fontSize: 14, flexWrap: "wrap", gap: 6
     }}>
       <span>📅 {new Date(plein.date).toLocaleDateString("fr-FR")}</span>
-      <span>🛢️ {plein.litres?.toFixed(1)} L</span>
+      <span>🛢️ {plein.litres?.toFixed(2)} L</span>
       <span>📍 {plein.kilometrage?.toLocaleString("fr-FR")} km</span>
       <span style={{ fontWeight: 700, color: TEAL_DARK }}>💶 {plein.montant?.toFixed(2)} €</span>
       <span style={{ color: GRAY, fontSize: 12 }}>{plein.conducteur}</span>
@@ -86,14 +85,22 @@ export default function CarburantModule({ user }) {
   const today = new Date().toISOString().split("T")[0];
 
   const [form, setForm] = useState({
-    date: today,
+    date:        today,
     kilometrage: "",
-    litres: "",
-    prixLitre: "",
-    conducteur: user?.displayName || user?.email || "",
+    montant:     "",   // ← saisi manuellement depuis le ticket
+    prixLitre:   "",   // ← saisi manuellement
+    conducteur:  user?.displayName || user?.email || "",
     commentaire: "",
   });
   const [errors, setErrors] = useState({});
+
+  // Litres calculés automatiquement
+  const litresCalcules =
+    form.montant && form.prixLitre &&
+    !isNaN(form.montant) && !isNaN(form.prixLitre) &&
+    parseFloat(form.prixLitre) > 0
+      ? (parseFloat(form.montant) / parseFloat(form.prixLitre)).toFixed(2)
+      : null;
 
   // ── Chargement Firebase ───────────────────────────────────────────────────
   useEffect(() => { fetchPleins(); }, []);
@@ -111,34 +118,37 @@ export default function CarburantModule({ user }) {
     }
   };
 
-  // ── Validation & soumission ───────────────────────────────────────────────
+  // ── Validation ────────────────────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.date)                                   e.date        = "Champ requis";
+    if (!form.date)                                 e.date        = "Champ requis";
     if (!form.kilometrage || isNaN(form.kilometrage)) e.kilometrage = "Valeur invalide";
-    if (!form.litres      || isNaN(form.litres))      e.litres      = "Valeur invalide";
-    if (!form.prixLitre   || isNaN(form.prixLitre))   e.prixLitre   = "Valeur invalide";
-    if (!form.conducteur)                              e.conducteur  = "Champ requis";
+    if (!form.montant     || isNaN(form.montant))   e.montant     = "Valeur invalide";
+    if (!form.prixLitre   || isNaN(form.prixLitre) || parseFloat(form.prixLitre) <= 0)
+                                                    e.prixLitre   = "Valeur invalide";
+    if (!form.conducteur)                           e.conducteur  = "Champ requis";
     return e;
   };
 
+  // ── Soumission ────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
     setLoading(true);
     try {
+      const litres = parseFloat(form.montant) / parseFloat(form.prixLitre);
       await addDoc(collection(db, "carburant"), {
         date:        form.date,
         kilometrage: parseFloat(form.kilometrage),
-        litres:      parseFloat(form.litres),
-        prixLitre:   parseFloat(form.prixLitre),
-        montant:     parseFloat((parseFloat(form.litres) * parseFloat(form.prixLitre)).toFixed(2)),
+        montant:     parseFloat(parseFloat(form.montant).toFixed(2)),
+        prixLitre:   parseFloat(parseFloat(form.prixLitre).toFixed(3)),
+        litres:      parseFloat(litres.toFixed(2)),
         conducteur:  form.conducteur,
         commentaire: form.commentaire,
         createdAt:   serverTimestamp(),
         createdBy:   user?.uid || "unknown",
       });
-      setForm({ date: today, kilometrage: "", litres: "", prixLitre: "", conducteur: user?.displayName || user?.email || "", commentaire: "" });
+      setForm({ date: today, kilometrage: "", montant: "", prixLitre: "", conducteur: user?.displayName || user?.email || "", commentaire: "" });
       setErrors({});
       await fetchPleins();
       setSuccessMsg("✅ Plein enregistré avec succès !");
@@ -166,7 +176,7 @@ export default function CarburantModule({ user }) {
   const litresMois   = pleinsMois.reduce((acc, p) => acc + (p.litres  || 0), 0);
   const nbPleinsMois = pleinsMois.length;
 
-  // Conso moyenne L/100km (tri par kilométrage croissant)
+  // Conso moyenne L/100km
   const sorted = [...pleins].sort((a, b) => a.kilometrage - b.kilometrage);
   let conso = null;
   if (sorted.length >= 2) {
@@ -226,7 +236,6 @@ export default function CarburantModule({ user }) {
       {vue === "dashboard" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-          {/* Alerte budget */}
           {(alerteBudget || alerteProche) && (
             <div style={{
               display: "flex", alignItems: "center", gap: 10,
@@ -243,14 +252,12 @@ export default function CarburantModule({ user }) {
             </div>
           )}
 
-          {/* Cartes stat */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <StatCard icon="💶" titre={`Dépense — ${nomMois}`} valeur={`${depenseMois.toFixed(2)} €`} sous={`${nbPleinsMois} plein${nbPleinsMois > 1 ? "s" : ""}`} />
             <StatCard icon="🛢️" titre="Litres ce mois"         valeur={`${litresMois.toFixed(1)} L`}  sous="consommés" />
             <StatCard icon="📊" titre="Conso. moyenne"          valeur={conso ? `${conso} L/100` : "—"} sous={conso ? "sur tout l'historique" : "min. 2 pleins requis"} />
           </div>
 
-          {/* Jauge budget */}
           <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontWeight: 600, color: "#333" }}>Budget mensuel</span>
@@ -264,7 +271,6 @@ export default function CarburantModule({ user }) {
             </div>
           </div>
 
-          {/* Dernier plein */}
           {pleins.length > 0 && (
             <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
               <div style={{ fontWeight: 600, color: "#333", marginBottom: 10 }}>Dernier plein enregistré</div>
@@ -272,7 +278,6 @@ export default function CarburantModule({ user }) {
             </div>
           )}
 
-          {/* État vide */}
           {pleins.length === 0 && !fetchLoading && (
             <div style={{ textAlign: "center", padding: 40, color: GRAY }}>
               <div style={{ fontSize: 40, marginBottom: 10 }}>⛽</div>
@@ -294,6 +299,7 @@ export default function CarburantModule({ user }) {
           <h3 style={{ margin: "0 0 18px", color: TEAL_DARK }}>Nouveau plein</h3>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+
             <Field label="Date *" error={errors.date}>
               <input type="date" value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
@@ -304,12 +310,12 @@ export default function CarburantModule({ user }) {
                 onChange={(e) => setForm({ ...form, kilometrage: e.target.value })} style={inputStyle} />
             </Field>
 
-            <Field label="Litres ajoutés *" error={errors.litres}>
-              <input type="number" step="0.01" placeholder="ex : 42.5" value={form.litres}
-                onChange={(e) => setForm({ ...form, litres: e.target.value })} style={inputStyle} />
+            <Field label="Montant total (€) *" hint="depuis votre ticket" error={errors.montant}>
+              <input type="number" step="0.01" placeholder="ex : 75.50" value={form.montant}
+                onChange={(e) => setForm({ ...form, montant: e.target.value })} style={inputStyle} />
             </Field>
 
-            <Field label="Prix au litre (€) *" error={errors.prixLitre}>
+            <Field label="Prix au litre (€) *" hint="depuis votre ticket" error={errors.prixLitre}>
               <input type="number" step="0.001" placeholder="ex : 1.879" value={form.prixLitre}
                 onChange={(e) => setForm({ ...form, prixLitre: e.target.value })} style={inputStyle} />
             </Field>
@@ -323,12 +329,21 @@ export default function CarburantModule({ user }) {
               <input type="text" placeholder="Station, remarque…" value={form.commentaire}
                 onChange={(e) => setForm({ ...form, commentaire: e.target.value })} style={inputStyle} />
             </Field>
+
           </div>
 
-          {/* Aperçu montant */}
-          {form.litres && form.prixLitre && !isNaN(form.litres) && !isNaN(form.prixLitre) && (
-            <div style={{ marginTop: 16, padding: "10px 14px", background: TEAL_LIGHT, borderRadius: 8, fontWeight: 600, color: TEAL_DARK }}>
-              💶 Montant estimé : {(parseFloat(form.litres) * parseFloat(form.prixLitre)).toFixed(2)} €
+          {/* Litres calculés automatiquement */}
+          {litresCalcules && (
+            <div style={{
+              marginTop: 16, padding: "12px 16px", background: TEAL_LIGHT,
+              borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center"
+            }}>
+              <span style={{ color: TEAL_DARK, fontWeight: 600 }}>
+                🛢️ Litres calculés automatiquement
+              </span>
+              <span style={{ fontSize: 22, fontWeight: 700, color: TEAL_DARK }}>
+                {litresCalcules} L
+              </span>
             </div>
           )}
 
@@ -367,7 +382,7 @@ export default function CarburantModule({ user }) {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                   <thead>
                     <tr style={{ background: TEAL }}>
-                      {["Date", "Km", "Litres", "Prix/L", "Montant", "Conducteur", "Commentaire"].map((h) => (
+                      {["Date", "Km", "Montant", "Prix/L", "Litres", "Conducteur", "Commentaire"].map((h) => (
                         <th key={h} style={{ padding: "9px 12px", textAlign: "left", color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -377,9 +392,9 @@ export default function CarburantModule({ user }) {
                       <tr key={p.id} style={{ background: i % 2 === 0 ? "#fff" : LIGHT_BG }}>
                         <td style={tdStyle}>{new Date(p.date).toLocaleDateString("fr-FR")}</td>
                         <td style={tdStyle}>{p.kilometrage?.toLocaleString("fr-FR")} km</td>
-                        <td style={tdStyle}>{p.litres?.toFixed(1)} L</td>
-                        <td style={tdStyle}>{p.prixLitre?.toFixed(3)} €</td>
                         <td style={{ ...tdStyle, fontWeight: 700, color: TEAL_DARK }}>{p.montant?.toFixed(2)} €</td>
+                        <td style={tdStyle}>{p.prixLitre?.toFixed(3)} €</td>
+                        <td style={tdStyle}>{p.litres?.toFixed(2)} L</td>
                         <td style={tdStyle}>{p.conducteur}</td>
                         <td style={{ ...tdStyle, color: GRAY, fontStyle: p.commentaire ? "normal" : "italic" }}>
                           {p.commentaire || "—"}
@@ -400,7 +415,6 @@ export default function CarburantModule({ user }) {
   );
 }
 
-// ─── Styles partagés ──────────────────────────────────────────────────────────
 const inputStyle = {
   padding: "9px 12px", borderRadius: 8, border: "1px solid #d1d5db",
   fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box",
