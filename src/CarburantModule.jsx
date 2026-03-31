@@ -104,9 +104,7 @@ export default function CarburantModule({ user }) {
     if (!form.date)                                    e.date        = "Champ requis";
     if (!form.kilometrage || isNaN(form.kilometrage))  e.kilometrage = "Valeur invalide";
     if (!form.montant     || isNaN(form.montant))      e.montant     = "Valeur invalide";
-    // prixLitre est OPTIONNEL — on valide uniquement s'il est renseigné
-    if (form.prixLitre !== "" && (isNaN(form.prixLitre) || parseFloat(form.prixLitre) <= 0))
-                                                       e.prixLitre   = "Valeur invalide";
+
     if (!form.conducteur)                              e.conducteur  = "Champ requis";
     return e;
   };
