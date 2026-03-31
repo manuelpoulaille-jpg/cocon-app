@@ -320,7 +320,7 @@ export default function CarburantModule({ user }) {
 
             <Field label="Prix au litre (€)" hint="optionnel — depuis votre ticket" error={errors.prixLitre}>
               <input type="number" step="0.001" placeholder="ex : 1.879" value={form.prixLitre}
-                onChange={(e) => setForm({ ...form, prixLitre: e.target.value })} style={inputStyle} />
+                onChange={(e) => { setForm({ ...form, prixLitre: e.target.value }); setErrors(prev => ({ ...prev, prixLitre: undefined })); }} style={inputStyle} />
             </Field>
 
             <Field label="Conducteur *" error={errors.conducteur}>
