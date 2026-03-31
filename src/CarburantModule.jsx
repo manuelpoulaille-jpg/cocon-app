@@ -4,15 +4,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect } from "react";
-import {
-  collection,
-  addDoc,
-  getDocs,
-  query,
-  orderBy,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "../firebase"; // ← adapter si nécessaire
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ⚙️  CONFIGURATION
@@ -28,52 +21,41 @@ const YELLOW     = "#f4a261";
 const LIGHT_BG   = "#f7fbfa";
 const GRAY       = "#6b7280";
 
-// ─── Composants utilitaires ───────────────────────────────────────────────────
-
 function StatCard({ icon, titre, valeur, sous }) {
   return (
-    <div style={{
-      background: "#fff", borderRadius: 12, padding: "16px 18px",
-      boxShadow: "0 1px 6px rgba(0,0,0,0.07)", flex: 1, minWidth: 140
-    }}>
-      <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
-      <div style={{ fontSize: 12, color: GRAY, marginBottom: 2 }}>{titre}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: TEAL_DARK }}>{valeur}</div>
-      <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{sous}</div>
+    <div style={{ background:"#fff", borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)", flex:1, minWidth:140 }}>
+      <div style={{ fontSize:24, marginBottom:6 }}>{icon}</div>
+      <div style={{ fontSize:12, color:GRAY, marginBottom:2 }}>{titre}</div>
+      <div style={{ fontSize:22, fontWeight:700, color:TEAL_DARK }}>{valeur}</div>
+      <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>{sous}</div>
     </div>
   );
 }
 
 function Field({ label, error, hint, children }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+      <label style={{ fontSize:13, fontWeight:600, color:"#444" }}>
         {label}
-        {hint && <span style={{ fontWeight: 400, color: GRAY, marginLeft: 6, fontSize: 12 }}>{hint}</span>}
+        {hint && <span style={{ fontWeight:400, color:GRAY, marginLeft:6, fontSize:12 }}>{hint}</span>}
       </label>
       {children}
-      {error && <span style={{ fontSize: 11, color: ORANGE }}>{error}</span>}
+      {error && <span style={{ fontSize:11, color:ORANGE }}>{error}</span>}
     </div>
   );
 }
 
 function PleinRow({ plein }) {
   return (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      padding: "10px 12px", background: LIGHT_BG, borderRadius: 8,
-      fontSize: 14, flexWrap: "wrap", gap: 6
-    }}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", background:LIGHT_BG, borderRadius:8, fontSize:14, flexWrap:"wrap", gap:6 }}>
       <span>📅 {new Date(plein.date).toLocaleDateString("fr-FR")}</span>
-      <span>🛢️ {plein.litres?.toFixed(2)} L</span>
+      {plein.litres && <span>🛢️ {plein.litres.toFixed(2)} L</span>}
       <span>📍 {plein.kilometrage?.toLocaleString("fr-FR")} km</span>
-      <span style={{ fontWeight: 700, color: TEAL_DARK }}>💶 {plein.montant?.toFixed(2)} €</span>
-      <span style={{ color: GRAY, fontSize: 12 }}>{plein.conducteur}</span>
+      <span style={{ fontWeight:700, color:TEAL_DARK }}>💶 {plein.montant?.toFixed(2)} €</span>
+      <span style={{ color:GRAY, fontSize:12 }}>{plein.conducteur}</span>
     </div>
   );
 }
-
-// ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function CarburantModule({ user }) {
   const [pleins, setPleins]             = useState([]);
@@ -87,14 +69,14 @@ export default function CarburantModule({ user }) {
   const [form, setForm] = useState({
     date:        today,
     kilometrage: "",
-    montant:     "",   // ← saisi manuellement depuis le ticket
-    prixLitre:   "",   // ← saisi manuellement
+    montant:     "",
+    prixLitre:   "",
     conducteur:  user?.displayName || user?.email || "",
     commentaire: "",
   });
   const [errors, setErrors] = useState({});
 
-  // Litres calculés automatiquement
+  // Litres calculés en temps réel (seulement si prixLitre renseigné)
   const litresCalcules =
     form.montant && form.prixLitre &&
     !isNaN(form.montant) && !isNaN(form.prixLitre) &&
@@ -102,7 +84,6 @@ export default function CarburantModule({ user }) {
       ? (parseFloat(form.montant) / parseFloat(form.prixLitre)).toFixed(2)
       : null;
 
-  // ── Chargement Firebase ───────────────────────────────────────────────────
   useEffect(() => { fetchPleins(); }, []);
 
   const fetchPleins = async () => {
@@ -118,33 +99,31 @@ export default function CarburantModule({ user }) {
     }
   };
 
-  // ── Validation ────────────────────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.date)                                   e.date        = "Champ requis";
-    if (!form.kilometrage || isNaN(form.kilometrage)) e.kilometrage = "Valeur invalide";
-    if (!form.montant     || isNaN(form.montant))     e.montant     = "Valeur invalide";
-    // prixLitre est optionnel — on valide uniquement s'il est renseigné
-    if (form.prixLitre && (isNaN(form.prixLitre) || parseFloat(form.prixLitre) <= 0))
-                                                      e.prixLitre   = "Valeur invalide";
-    if (!form.conducteur)                             e.conducteur  = "Champ requis";
+    if (!form.date)                                    e.date        = "Champ requis";
+    if (!form.kilometrage || isNaN(form.kilometrage))  e.kilometrage = "Valeur invalide";
+    if (!form.montant     || isNaN(form.montant))      e.montant     = "Valeur invalide";
+    // prixLitre est OPTIONNEL — on valide uniquement s'il est renseigné
+    if (form.prixLitre !== "" && (isNaN(form.prixLitre) || parseFloat(form.prixLitre) <= 0))
+                                                       e.prixLitre   = "Valeur invalide";
+    if (!form.conducteur)                              e.conducteur  = "Champ requis";
     return e;
   };
 
-  // ── Soumission ────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
     setLoading(true);
     try {
-      const litres = form.prixLitre && parseFloat(form.prixLitre) > 0
+      const litres = form.prixLitre !== "" && parseFloat(form.prixLitre) > 0
         ? parseFloat((parseFloat(form.montant) / parseFloat(form.prixLitre)).toFixed(2))
         : null;
       await addDoc(collection(db, "carburant"), {
         date:        form.date,
         kilometrage: parseFloat(form.kilometrage),
         montant:     parseFloat(parseFloat(form.montant).toFixed(2)),
-        prixLitre:   form.prixLitre ? parseFloat(parseFloat(form.prixLitre).toFixed(3)) : null,
+        prixLitre:   form.prixLitre !== "" ? parseFloat(parseFloat(form.prixLitre).toFixed(3)) : null,
         litres:      litres,
         conducteur:  form.conducteur,
         commentaire: form.commentaire,
@@ -164,11 +143,10 @@ export default function CarburantModule({ user }) {
     }
   };
 
-  // ── Calculs stats ─────────────────────────────────────────────────────────
   const now          = new Date();
   const moisCourant  = now.getMonth();
   const anneeCourant = now.getFullYear();
-  const nomMois      = now.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  const nomMois      = now.toLocaleDateString("fr-FR", { month:"long", year:"numeric" });
 
   const pleinsMois   = pleins.filter((p) => {
     const d = new Date(p.date);
@@ -179,13 +157,15 @@ export default function CarburantModule({ user }) {
   const litresMois   = pleinsMois.reduce((acc, p) => acc + (p.litres  || 0), 0);
   const nbPleinsMois = pleinsMois.length;
 
-  // Conso moyenne L/100km
   const sorted = [...pleins].sort((a, b) => a.kilometrage - b.kilometrage);
   let conso = null;
   if (sorted.length >= 2) {
-    const deltaKm = sorted[sorted.length - 1].kilometrage - sorted[0].kilometrage;
-    const totalL  = sorted.slice(1).reduce((acc, p) => acc + p.litres, 0);
-    if (deltaKm > 0) conso = ((totalL / deltaKm) * 100).toFixed(1);
+    const pleinsAvecLitres = sorted.filter(p => p.litres);
+    if (pleinsAvecLitres.length >= 2) {
+      const deltaKm = sorted[sorted.length - 1].kilometrage - sorted[0].kilometrage;
+      const totalL  = pleinsAvecLitres.slice(1).reduce((acc, p) => acc + p.litres, 0);
+      if (deltaKm > 0) conso = ((totalL / deltaKm) * 100).toFixed(1);
+    }
   }
 
   const budgetPct    = Math.min((depenseMois / BUDGET_MENSUEL_EUROS) * 100, 100);
@@ -194,28 +174,28 @@ export default function CarburantModule({ user }) {
   const jaugeColor   = alerteBudget ? ORANGE : alerteProche ? YELLOW : TEAL;
   const totalGeneral = pleins.reduce((acc, p) => acc + (p.montant || 0), 0);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDU
-  // ─────────────────────────────────────────────────────────────────────────
+  const inputStyle = {
+    padding:"9px 12px", borderRadius:8, border:"1px solid #d1d5db",
+    fontSize:14, outline:"none", width:"100%", boxSizing:"border-box",
+  };
+
+  const tdStyle = { padding:"9px 12px", borderBottom:"1px solid #f0f0f0", whiteSpace:"nowrap" };
+
   return (
-    <div style={{ fontFamily: "'Segoe UI', sans-serif", maxWidth: 720, margin: "0 auto", padding: "0 16px 40px" }}>
+    <div style={{ fontFamily:"'Segoe UI', sans-serif", maxWidth:720, margin:"0 auto", padding:"0 16px 40px" }}>
 
       {/* HEADER */}
-      <div style={{
-        background: `linear-gradient(135deg, ${TEAL}, ${TEAL_DARK})`,
-        borderRadius: 16, padding: "20px 24px", marginBottom: 20,
-        color: "#fff", boxShadow: "0 4px 16px rgba(42,157,143,0.3)"
-      }}>
-        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 14 }}>⛽ Suivi Carburant</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ background:`linear-gradient(135deg, ${TEAL}, ${TEAL_DARK})`, borderRadius:16, padding:"20px 24px", marginBottom:20, color:"#fff", boxShadow:"0 4px 16px rgba(42,157,143,0.3)" }}>
+        <div style={{ fontSize:22, fontWeight:700, marginBottom:14 }}>⛽ Suivi Carburant</div>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {[
-            { id: "dashboard",  label: "🏠 Tableau de bord" },
-            { id: "ajouter",    label: "+ Ajouter un plein" },
-            { id: "historique", label: "📋 Historique" },
+            { id:"dashboard",  label:"🏠 Tableau de bord" },
+            { id:"ajouter",    label:"+ Ajouter un plein" },
+            { id:"historique", label:"📋 Historique" },
           ].map(({ id, label }) => (
             <button key={id} onClick={() => setVue(id)} style={{
-              padding: "7px 16px", borderRadius: 20, border: "none", cursor: "pointer",
-              fontWeight: 600, fontSize: 13, transition: "all .2s",
+              padding:"7px 16px", borderRadius:20, border:"none", cursor:"pointer",
+              fontWeight:600, fontSize:13,
               background: vue === id ? "#fff" : "rgba(255,255,255,0.18)",
               color:      vue === id ? TEAL_DARK : "#fff",
             }}>
@@ -225,70 +205,54 @@ export default function CarburantModule({ user }) {
         </div>
       </div>
 
-      {/* Notification succès */}
+      {/* Succès */}
       {successMsg && (
-        <div style={{
-          background: "#e8f5e9", border: "1px solid #a5d6a7", color: "#2e7d32",
-          padding: "12px 16px", borderRadius: 10, marginBottom: 16, fontWeight: 600
-        }}>
+        <div style={{ background:"#e8f5e9", border:"1px solid #a5d6a7", color:"#2e7d32", padding:"12px 16px", borderRadius:10, marginBottom:16, fontWeight:600 }}>
           {successMsg}
         </div>
       )}
 
-      {/* ══════════ DASHBOARD ══════════ */}
+      {/* ══ DASHBOARD ══ */}
       {vue === "dashboard" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
           {(alerteBudget || alerteProche) && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "12px 16px", borderRadius: 10, border: "2px solid",
-              borderColor: alerteBudget ? ORANGE : YELLOW,
-              background:  alerteBudget ? "#fff4f0" : "#fffbf0",
-            }}>
-              <span style={{ fontSize: 22 }}>{alerteBudget ? "🔴" : "🟡"}</span>
-              <span style={{ fontWeight: 600, fontSize: 14, color: alerteBudget ? ORANGE : "#c07020" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 16px", borderRadius:10, border:"2px solid", borderColor:alerteBudget?ORANGE:YELLOW, background:alerteBudget?"#fff4f0":"#fffbf0" }}>
+              <span style={{ fontSize:22 }}>{alerteBudget ? "🔴" : "🟡"}</span>
+              <span style={{ fontWeight:600, fontSize:14, color:alerteBudget?ORANGE:"#c07020" }}>
                 {alerteBudget
-                  ? `Budget dépassé ! ${depenseMois.toFixed(2)} € dépensés pour un budget de ${BUDGET_MENSUEL_EUROS} €.`
+                  ? `Budget dépassé ! ${depenseMois.toFixed(2)} € dépensés pour ${BUDGET_MENSUEL_EUROS} € prévus.`
                   : `Attention : ${budgetPct.toFixed(0)} % du budget atteint — ${depenseMois.toFixed(2)} € / ${BUDGET_MENSUEL_EUROS} €`}
               </span>
             </div>
           )}
-
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <StatCard icon="💶" titre={`Dépense — ${nomMois}`} valeur={`${depenseMois.toFixed(2)} €`} sous={`${nbPleinsMois} plein${nbPleinsMois > 1 ? "s" : ""}`} />
-            <StatCard icon="🛢️" titre="Litres ce mois"         valeur={`${litresMois.toFixed(1)} L`}  sous="consommés" />
-            <StatCard icon="📊" titre="Conso. moyenne"          valeur={conso ? `${conso} L/100` : "—"} sous={conso ? "sur tout l'historique" : "min. 2 pleins requis"} />
+          <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+            <StatCard icon="💶" titre={`Dépense — ${nomMois}`} valeur={`${depenseMois.toFixed(2)} €`} sous={`${nbPleinsMois} plein${nbPleinsMois>1?"s":""}`} />
+            <StatCard icon="🛢️" titre="Litres ce mois" valeur={`${litresMois.toFixed(1)} L`} sous="consommés" />
+            <StatCard icon="📊" titre="Conso. moyenne" valeur={conso ? `${conso} L/100` : "—"} sous={conso ? "sur tout l'historique" : "min. 2 pleins requis"} />
           </div>
-
-          <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontWeight: 600, color: "#333" }}>Budget mensuel</span>
-              <span style={{ fontWeight: 700, color: jaugeColor }}>{depenseMois.toFixed(2)} € / {BUDGET_MENSUEL_EUROS} €</span>
+          <div style={{ background:"#fff", borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+              <span style={{ fontWeight:600, color:"#333" }}>Budget mensuel</span>
+              <span style={{ fontWeight:700, color:jaugeColor }}>{depenseMois.toFixed(2)} € / {BUDGET_MENSUEL_EUROS} €</span>
             </div>
-            <div style={{ height: 12, background: "#e5e7eb", borderRadius: 99, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 99, transition: "width .5s ease", width: `${budgetPct}%`, background: jaugeColor }} />
+            <div style={{ height:12, background:"#e5e7eb", borderRadius:99, overflow:"hidden" }}>
+              <div style={{ height:"100%", borderRadius:99, transition:"width .5s ease", width:`${budgetPct}%`, background:jaugeColor }} />
             </div>
-            <div style={{ textAlign: "right", fontSize: 12, color: "#888", marginTop: 4 }}>
+            <div style={{ textAlign:"right", fontSize:12, color:"#888", marginTop:4 }}>
               Il reste {Math.max(0, BUDGET_MENSUEL_EUROS - depenseMois).toFixed(2)} €
             </div>
           </div>
-
           {pleins.length > 0 && (
-            <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-              <div style={{ fontWeight: 600, color: "#333", marginBottom: 10 }}>Dernier plein enregistré</div>
+            <div style={{ background:"#fff", borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
+              <div style={{ fontWeight:600, color:"#333", marginBottom:10 }}>Dernier plein enregistré</div>
               <PleinRow plein={pleins[0]} />
             </div>
           )}
-
           {pleins.length === 0 && !fetchLoading && (
-            <div style={{ textAlign: "center", padding: 40, color: GRAY }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>⛽</div>
+            <div style={{ textAlign:"center", padding:40, color:GRAY }}>
+              <div style={{ fontSize:40, marginBottom:10 }}>⛽</div>
               <p>Aucun plein enregistré pour l'instant.</p>
-              <button onClick={() => setVue("ajouter")} style={{
-                marginTop: 10, background: TEAL, color: "#fff", border: "none",
-                borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontWeight: 600
-              }}>
+              <button onClick={() => setVue("ajouter")} style={{ marginTop:10, background:TEAL, color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", cursor:"pointer", fontWeight:600 }}>
                 Ajouter le premier plein
               </button>
             </div>
@@ -296,12 +260,11 @@ export default function CarburantModule({ user }) {
         </div>
       )}
 
-      {/* ══════════ FORMULAIRE ══════════ */}
+      {/* ══ FORMULAIRE ══ */}
       {vue === "ajouter" && (
-        <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-          <h3 style={{ margin: "0 0 18px", color: TEAL_DARK }}>Nouveau plein</h3>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ background:"#fff", borderRadius:12, padding:"20px 22px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
+          <h3 style={{ margin:"0 0 18px", color:TEAL_DARK }}>Nouveau plein</h3>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
 
             <Field label="Date *" error={errors.date}>
               <input type="date" value={form.date}
@@ -318,9 +281,13 @@ export default function CarburantModule({ user }) {
                 onChange={(e) => setForm({ ...form, montant: e.target.value })} style={inputStyle} />
             </Field>
 
-            <Field label="Prix au litre (€)" hint="optionnel — depuis votre ticket" error={errors.prixLitre}>
+            <Field label="Prix au litre (€)" hint="optionnel" error={errors.prixLitre}>
               <input type="number" step="0.001" placeholder="ex : 1.879" value={form.prixLitre}
-                onChange={(e) => { setForm({ ...form, prixLitre: e.target.value }); setErrors(prev => ({ ...prev, prixLitre: undefined })); }} style={inputStyle} />
+                onChange={(e) => {
+                  setForm({ ...form, prixLitre: e.target.value });
+                  setErrors(prev => ({ ...prev, prixLitre: undefined }));
+                }}
+                style={inputStyle} />
             </Field>
 
             <Field label="Conducteur *" error={errors.conducteur}>
@@ -335,58 +302,43 @@ export default function CarburantModule({ user }) {
 
           </div>
 
-          {/* Litres calculés automatiquement */}
+          {/* Litres calculés */}
           {litresCalcules && (
-            <div style={{
-              marginTop: 16, padding: "12px 16px", background: TEAL_LIGHT,
-              borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center"
-            }}>
-              <span style={{ color: TEAL_DARK, fontWeight: 600 }}>
-                🛢️ Litres calculés automatiquement
-              </span>
-              <span style={{ fontSize: 22, fontWeight: 700, color: TEAL_DARK }}>
-                {litresCalcules} L
-              </span>
+            <div style={{ marginTop:16, padding:"12px 16px", background:TEAL_LIGHT, borderRadius:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ color:TEAL_DARK, fontWeight:600 }}>🛢️ Litres calculés automatiquement</span>
+              <span style={{ fontSize:22, fontWeight:700, color:TEAL_DARK }}>{litresCalcules} L</span>
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button onClick={() => setVue("dashboard")} style={{
-              flex: 1, padding: "11px 0", borderRadius: 8, border: "1px solid #ddd",
-              background: "#fff", cursor: "pointer", fontWeight: 600, color: "#555"
-            }}>
+          <div style={{ display:"flex", gap:10, marginTop:20 }}>
+            <button onClick={() => setVue("dashboard")} style={{ flex:1, padding:"11px 0", borderRadius:8, border:"1px solid #ddd", background:"#fff", cursor:"pointer", fontWeight:600, color:"#555" }}>
               Annuler
             </button>
-            <button onClick={handleSubmit} disabled={loading} style={{
-              flex: 2, padding: "11px 0", borderRadius: 8, border: "none",
-              background: loading ? "#aaa" : TEAL, color: "#fff",
-              cursor: loading ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 15
-            }}>
+            <button onClick={handleSubmit} disabled={loading} style={{ flex:2, padding:"11px 0", borderRadius:8, border:"none", background:loading?"#aaa":TEAL, color:"#fff", cursor:loading?"not-allowed":"pointer", fontWeight:700, fontSize:15 }}>
               {loading ? "Enregistrement…" : "Enregistrer le plein"}
             </button>
           </div>
         </div>
       )}
 
-      {/* ══════════ HISTORIQUE ══════════ */}
+      {/* ══ HISTORIQUE ══ */}
       {vue === "historique" && (
-        <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-          <h3 style={{ margin: "0 0 16px", color: TEAL_DARK }}>
+        <div style={{ background:"#fff", borderRadius:12, padding:"20px 22px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
+          <h3 style={{ margin:"0 0 16px", color:TEAL_DARK }}>
             Historique des pleins {pleins.length > 0 && `(${pleins.length})`}
           </h3>
-
           {fetchLoading ? (
-            <div style={{ textAlign: "center", padding: 30, color: GRAY }}>Chargement…</div>
+            <div style={{ textAlign:"center", padding:30, color:GRAY }}>Chargement…</div>
           ) : pleins.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 30, color: GRAY }}>Aucun plein enregistré.</div>
+            <div style={{ textAlign:"center", padding:30, color:GRAY }}>Aucun plein enregistré.</div>
           ) : (
             <>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                   <thead>
-                    <tr style={{ background: TEAL }}>
-                      {["Date", "Km", "Montant", "Prix/L", "Litres", "Conducteur", "Commentaire"].map((h) => (
-                        <th key={h} style={{ padding: "9px 12px", textAlign: "left", color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                    <tr style={{ background:TEAL }}>
+                      {["Date","Km","Montant","Prix/L","Litres","Conducteur","Commentaire"].map((h) => (
+                        <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#fff", fontWeight:600, whiteSpace:"nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -395,11 +347,11 @@ export default function CarburantModule({ user }) {
                       <tr key={p.id} style={{ background: i % 2 === 0 ? "#fff" : LIGHT_BG }}>
                         <td style={tdStyle}>{new Date(p.date).toLocaleDateString("fr-FR")}</td>
                         <td style={tdStyle}>{p.kilometrage?.toLocaleString("fr-FR")} km</td>
-                        <td style={{ ...tdStyle, fontWeight: 700, color: TEAL_DARK }}>{p.montant?.toFixed(2)} €</td>
-                        <td style={tdStyle}>{p.prixLitre?.toFixed(3)} €</td>
-                        <td style={tdStyle}>{p.litres?.toFixed(2)} L</td>
+                        <td style={{ ...tdStyle, fontWeight:700, color:TEAL_DARK }}>{p.montant?.toFixed(2)} €</td>
+                        <td style={tdStyle}>{p.prixLitre ? `${p.prixLitre.toFixed(3)} €` : "—"}</td>
+                        <td style={tdStyle}>{p.litres ? `${p.litres.toFixed(2)} L` : "—"}</td>
                         <td style={tdStyle}>{p.conducteur}</td>
-                        <td style={{ ...tdStyle, color: GRAY, fontStyle: p.commentaire ? "normal" : "italic" }}>
+                        <td style={{ ...tdStyle, color:GRAY, fontStyle:p.commentaire?"normal":"italic" }}>
                           {p.commentaire || "—"}
                         </td>
                       </tr>
@@ -407,7 +359,7 @@ export default function CarburantModule({ user }) {
                   </tbody>
                 </table>
               </div>
-              <div style={{ marginTop: 14, textAlign: "right", fontWeight: 700, color: TEAL_DARK, fontSize: 15 }}>
+              <div style={{ marginTop:14, textAlign:"right", fontWeight:700, color:TEAL_DARK, fontSize:15 }}>
                 Total général : {totalGeneral.toFixed(2)} €
               </div>
             </>
@@ -417,12 +369,3 @@ export default function CarburantModule({ user }) {
     </div>
   );
 }
-
-const inputStyle = {
-  padding: "9px 12px", borderRadius: 8, border: "1px solid #d1d5db",
-  fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box",
-};
-
-const tdStyle = {
-  padding: "9px 12px", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap"
-};
