@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 import { doc, getDoc } from "firebase/firestore";
 import AdminDashboard from "./components/AdminDashboard";
 import TechDashboard from "./components/TechDashboard";
+import CarburantModule from "./components/CarburantModule";
 import "./App.css";
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
+  const [activePage, setActivePage] = useState("dashboard"); // "dashboard" | "carburant"
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -81,13 +83,58 @@ export default function App() {
         <div className="header-left">
           <img src="/logo.png" alt="Cocon+" style={{height:40,objectFit:"contain",marginRight:8,background:"white",borderRadius:8,padding:"3px 6px"}} />
           <div>
-            <span className="header-role" style={{color:"rgba(255,255,255,0.9)",fontSize:12}}>{role === "admin" ? "Administration" : "Collaborateur"}</span>
+            <span className="header-role" style={{color:"rgba(255,255,255,0.9)",fontSize:12}}>
+              {role === "admin" ? "Administration" : "Collaborateur"}
+            </span>
           </div>
         </div>
+
+        {/* ── Navigation ── */}
+        <nav style={{display:"flex",gap:6}}>
+          <button
+            onClick={() => setActivePage("dashboard")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 20,
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 600,
+              fontSize: 13,
+              background: activePage === "dashboard" ? "#fff" : "rgba(255,255,255,0.18)",
+              color:      activePage === "dashboard" ? "#1f7a6e" : "#fff",
+            }}
+          >
+            🏠 Bons
+          </button>
+          <button
+            onClick={() => setActivePage("carburant")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 20,
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 600,
+              fontSize: 13,
+              background: activePage === "carburant" ? "#fff" : "rgba(255,255,255,0.18)",
+              color:      activePage === "carburant" ? "#1f7a6e" : "#fff",
+            }}
+          >
+            ⛽ Carburant
+          </button>
+        </nav>
+
         <button className="btn-logout" onClick={() => signOut(auth)}>Déconnexion</button>
       </header>
+
       <main className="app-main">
-        {role === "admin" ? <AdminDashboard user={user} /> : <TechDashboard user={user} />}
+        {activePage === "dashboard" && (
+          role === "admin"
+            ? <AdminDashboard user={user} />
+            : <TechDashboard user={user} />
+        )}
+        {activePage === "carburant" && (
+          <CarburantModule user={user} />
+        )}
       </main>
     </div>
   );
