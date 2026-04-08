@@ -48,27 +48,33 @@ export default function AdminDashboard({ user }) {
     e.preventDefault();
     if (form.types.length === 0) { alert("Sélectionnez au moins un type d'intervention"); return; }
     setSaving(true);
-    await addDoc(collection(db, "bons"), {
-      ...form,
-      clientAdresse: form.adresseIntervention,
-      signataire: form.signataire,
-      type: form.types.join(", "),
-      techNom: form.techId,
-      ref: form.numDevis ? "INT-" + form.numDevis.replace(/\D/g, "").slice(-5) : refNum(),
-      statut: "planifié",
-      createdAt: Timestamp.now(),
-      createdBy: user.uid,
-      heureArrivee: null, heureFin: null,
-      obsCocon: "", obsClient: "",
-      signatureTech: null, signatureClient: null,
-      montantFacture: form.montantFacture ? parseFloat(form.montantFacture) : null, // 👈 NOUVEAU
-    });
-    setMsg("Bon créé !");
-    setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",types:[],datePrevue:"",heurePrevue:"",techId:"",montantFacture:"" });
-    setView("dashboard");
-    fetchBons();
-    setSaving(false);
-    setTimeout(() => setMsg(""), 3000);
+    try {
+      await addDoc(collection(db, "bons"), {
+        ...form,
+        clientAdresse: form.adresseIntervention,
+        signataire: form.signataire,
+        type: form.types.join(", "),
+        techNom: form.techId,
+        ref: form.numDevis ? "INT-" + form.numDevis.replace(/\D/g, "").slice(-5) : refNum(),
+        statut: "planifié",
+        createdAt: Timestamp.now(),
+        createdBy: user.uid,
+        heureArrivee: null, heureFin: null,
+        obsCocon: "", obsClient: "",
+        signatureTech: null, signatureClient: null,
+        montantFacture: form.montantFacture ? parseFloat(form.montantFacture) : null,
+      });
+      await fetchBons();
+      setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",types:[],datePrevue:"",heurePrevue:"",techId:"",montantFacture:"" });
+      setMsg("Bon créé !");
+      setView("dashboard");
+      setTimeout(() => setMsg(""), 3000);
+    } catch (err) {
+      console.error("Erreur création bon :", err);
+      alert("Une erreur est survenue, veuillez réessayer.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const deleteBon = async () => {
