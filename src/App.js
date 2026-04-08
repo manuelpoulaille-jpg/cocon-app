@@ -106,21 +106,23 @@ export default function App() {
           >
             🏠 Bons
           </button>
-          <button
-            onClick={() => setActivePage("carburant")}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 20,
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-              background: activePage === "carburant" ? "#fff" : "rgba(255,255,255,0.18)",
-              color:      activePage === "carburant" ? "#1f7a6e" : "#fff",
-            }}
-          >
-            ⛽ Carburant
-          </button>
+          {role === "admin" && (
+            <button
+              onClick={() => setActivePage("carburant")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 20,
+                border: "none",
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 13,
+                background: activePage === "carburant" ? "#fff" : "rgba(255,255,255,0.18)",
+                color:      activePage === "carburant" ? "#1f7a6e" : "#fff",
+              }}
+            >
+              ⛽ Carburant
+            </button>
+          )}
         </nav>
 
         <button className="btn-logout" onClick={() => signOut(auth)}>Déconnexion</button>
@@ -132,7 +134,7 @@ export default function App() {
             ? <AdminDashboard user={user} />
             : <TechDashboard user={user} />
         )}
-        {activePage === "carburant" && (
+        {activePage === "carburant" && role === "admin" && (
           <CarburantModule user={user} />
         )}
       </main>
