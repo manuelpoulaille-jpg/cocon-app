@@ -197,8 +197,6 @@ export default function TechDashboard({ user }) {
         collaborateur: bon.techNom,
         observations_cocon: bon.obsCocon || "—",
         observations_client: bon.obsClient || "—",
-        signature_tech: bon.signatureTech || "",
-        signature_client: bon.signatureClient || "",
       }, EMAILJS_KEY);
       setEmailStatus("sent");
       await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
