@@ -146,7 +146,17 @@ export default function AdminDashboard({ user }) {
       doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
       doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
     };
-    const row = (label, val) => { if (y > 260) { doc2.addPage(); y = 20; } doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
+    const row = (label, val, wrap = false) => {
+      if (y > 260) { doc2.addPage(); y = 20; }
+      const text = label + " : " + (val || "—");
+      if (wrap) {
+        const lines = doc2.splitTextToSize(text, mr - ml);
+        doc2.text(lines, ml, y);
+        y += lines.length * 6;
+      } else {
+        doc2.text(text, ml, y); y += 6;
+      }
+    };
     section("INFORMATIONS");
     row("Référence", bon.ref);
     if (bon.numDevis) row("N° Devis", bon.numDevis);
@@ -154,8 +164,8 @@ export default function AdminDashboard({ user }) {
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation);
-    row("Adresse intervention", bon.adresseIntervention || bon.clientAdresse); y += 2;
+    if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation, true);
+    row("Adresse intervention", bon.adresseIntervention || bon.clientAdresse, true); y += 2;
     if (bon.demandeClient) { section("DEMANDE CLIENT"); const d = doc2.splitTextToSize(bon.demandeClient, 175); doc2.text(d, ml, y); y += d.length * 5 + 5; }
     section("INTERVENTION");
     row("Type", bon.type);
@@ -177,6 +187,9 @@ export default function AdminDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
+    y += 32;
+    doc2.setTextColor(100,100,100); doc2.setFontSize(8);
+    if (bon.signataire) doc2.text("Signataire : " + bon.signataire, ml+90, y);
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
     doc2.save("bon-" + bon.ref + ".pdf");

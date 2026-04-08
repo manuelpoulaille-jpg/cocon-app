@@ -140,13 +140,22 @@ export default function TechDashboard({ user }) {
       doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
       doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
     };
-    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
+    const row = (label, val, wrap = false) => {
+      const text = label + " : " + (val || "—");
+      if (wrap) {
+        const lines = doc2.splitTextToSize(text, mr - ml);
+        doc2.text(lines, ml, y);
+        y += lines.length * 6;
+      } else {
+        doc2.text(text, ml, y); y += 6;
+      }
+    };
 
     section("COLLABORATEUR"); row("Nom", bon.techNom); y += 2;
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    row("Adresse", bon.clientAdresse); y += 2;
+    row("Adresse", bon.clientAdresse, true); y += 2;
     section("INTERVENTION");
     row("Type", bon.type);
     row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
@@ -167,6 +176,9 @@ export default function TechDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
+    y += 32;
+    doc2.setTextColor(100,100,100); doc2.setFontSize(8);
+    if (bon.signataire) doc2.text("Signataire : " + bon.signataire, ml+90, y);
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
 
@@ -197,6 +209,8 @@ export default function TechDashboard({ user }) {
         collaborateur: bon.techNom,
         observations_cocon: bon.obsCocon || "—",
         observations_client: bon.obsClient || "—",
+        signature_tech: bon.signatureTech || "",
+        signature_client: bon.signatureClient || "",
       }, EMAILJS_KEY);
       setEmailStatus("sent");
       await updateDoc(doc(db, "bons", bon.id), { emailEnvoye: true });
@@ -428,10 +442,10 @@ export default function TechDashboard({ user }) {
                     />
                   </div>
                 )}
-                {selected.statut === "terminé" && selected.signataire && (
-                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>
-                )}
                 {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
+                {selected.statut === "terminé" && selected.signataire && (
+                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:4,fontStyle:"italic"}}>{selected.signataire}</p>
+                )}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
               </div>
             </div>
