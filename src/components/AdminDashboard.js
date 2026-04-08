@@ -23,8 +23,7 @@ export default function AdminDashboard({ user }) {
     clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
     adresseFacturation:"", adresseIntervention:"",
     demandeClient:"", numDevis:"", signataire:"",
-    types:[], datePrevue:"", heurePrevue:"", techId:"",
-    montantFacture:"", // 👈 NOUVEAU
+    types:[], datePrevue:"", heurePrevue:"", techId:""
   });
 
   useEffect(() => { fetchBons(); }, []);
@@ -50,28 +49,48 @@ export default function AdminDashboard({ user }) {
     setSaving(true);
     try {
       await addDoc(collection(db, "bons"), {
-        ...form,
-        clientAdresse: form.adresseIntervention,
-        signataire: form.signataire,
-        type: form.types.join(", "),
-        techNom: form.techId,
-        ref: form.numDevis ? "INT-" + form.numDevis.replace(/\D/g, "").slice(-5) : refNum(),
-        statut: "planifié",
-        createdAt: Timestamp.now(),
-        createdBy: user.uid,
-        heureArrivee: null, heureFin: null,
-        obsCocon: "", obsClient: "",
-        signatureTech: null, signatureClient: null,
-        montantFacture: form.montantFacture ? parseFloat(form.montantFacture) : null,
+        clientNom:           form.clientNom,
+        clientPrenom:        form.clientPrenom,
+        clientTel:           form.clientTel,
+        clientEmail:         form.clientEmail,
+        adresseFacturation:  form.adresseFacturation,
+        adresseIntervention: form.adresseIntervention,
+        clientAdresse:       form.adresseIntervention,
+        demandeClient:       form.demandeClient,
+        numDevis:            form.numDevis,
+        signataire:          form.signataire || "",
+        types:               form.types,
+        type:                form.types.join(", "),
+        datePrevue:          form.datePrevue,
+        heurePrevue:         form.heurePrevue,
+        techNom:             form.techId,
+        ref:                 form.numDevis ? "INT-" + form.numDevis.replace(/\D/g, "").slice(-5) : refNum(),
+        statut:              "planifié",
+        createdAt:           Timestamp.now(),
+        createdBy:           user?.uid || "",
+        heureArrivee:        null,
+        heureFin:            null,
+        obsCocon:            "",
+        obsClient:           "",
+        signatureTech:       null,
+        signatureClient:     null,
+        emailEnvoye:         false,
+        montantFacture:      form.montantFacture ? parseFloat(form.montantFacture) : null,
       });
       await fetchBons();
-      setForm({ clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",types:[],datePrevue:"",heurePrevue:"",techId:"",montantFacture:"" });
+      setForm({
+        clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
+        adresseFacturation:"", adresseIntervention:"",
+        demandeClient:"", numDevis:"", signataire:"",
+        types:[], datePrevue:"", heurePrevue:"", techId:"",
+        montantFacture:"",
+      });
       setMsg("Bon créé !");
       setView("dashboard");
       setTimeout(() => setMsg(""), 3000);
     } catch (err) {
       console.error("Erreur création bon :", err);
-      alert("Une erreur est survenue, veuillez réessayer.");
+      alert("Erreur : " + (err?.message || err?.code || JSON.stringify(err)));
     } finally {
       setSaving(false);
     }
@@ -103,7 +122,6 @@ export default function AdminDashboard({ user }) {
       techNom: editForm.techId,
       types: editForm.types,
       type: editForm.types.join(", "),
-      montantFacture: editForm.montantFacture ? parseFloat(editForm.montantFacture) : null, // 👈 NOUVEAU
     });
     const updated = { ...selected, ...editForm, techNom: editForm.techId, type: editForm.types.join(", ") };
     setSelected(updated);
@@ -146,17 +164,7 @@ export default function AdminDashboard({ user }) {
       doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
       doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
     };
-    const row = (label, val, wrap = false) => {
-      if (y > 260) { doc2.addPage(); y = 20; }
-      const text = label + " : " + (val || "—");
-      if (wrap) {
-        const lines = doc2.splitTextToSize(text, mr - ml);
-        doc2.text(lines, ml, y);
-        y += lines.length * 6;
-      } else {
-        doc2.text(text, ml, y); y += 6;
-      }
-    };
+    const row = (label, val) => { if (y > 260) { doc2.addPage(); y = 20; } doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
     section("INFORMATIONS");
     row("Référence", bon.ref);
     if (bon.numDevis) row("N° Devis", bon.numDevis);
@@ -164,8 +172,8 @@ export default function AdminDashboard({ user }) {
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation, true);
-    row("Adresse intervention", bon.adresseIntervention || bon.clientAdresse, true); y += 2;
+    if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation);
+    row("Adresse intervention", bon.adresseIntervention || bon.clientAdresse); y += 2;
     if (bon.demandeClient) { section("DEMANDE CLIENT"); const d = doc2.splitTextToSize(bon.demandeClient, 175); doc2.text(d, ml, y); y += d.length * 5 + 5; }
     section("INTERVENTION");
     row("Type", bon.type);
@@ -187,9 +195,6 @@ export default function AdminDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
-    y += 32;
-    doc2.setTextColor(100,100,100); doc2.setFontSize(8);
-    if (bon.signataire) doc2.text("Signataire : " + bon.signataire, ml+90, y);
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
     doc2.save("bon-" + bon.ref + ".pdf");
@@ -262,14 +267,9 @@ export default function AdminDashboard({ user }) {
                 <option value="">-- Sélectionner --</option>
                 <option value="Dimitri">Dimitri</option>
                 <option value="Georges">Georges</option>
-                <option value="Equipe">Equipe</option>
+                  <option value="Equipe">Equipe</option>
               </select>
             </div>
-          </div>
-          {/* 👇 NOUVEAU — Montant facturé */}
-          <div className="field">
-            <label>Montant facturé (€) <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel — pour l'analyse de rentabilité</span></label>
-            <input type="number" step="0.01" placeholder="ex : 250.00" value={form.montantFacture} onChange={e=>setForm({...form,montantFacture:e.target.value})} />
           </div>
         </div>
 
@@ -339,11 +339,6 @@ export default function AdminDashboard({ user }) {
             </select>
           </div>
         </div>
-        {/* 👇 NOUVEAU — Montant facturé */}
-        <div className="field">
-          <label>Montant facturé (€) <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel</span></label>
-          <input type="number" step="0.01" placeholder="ex : 250.00" value={editForm.montantFacture||""} onChange={e=>setEditForm({...editForm,montantFacture:e.target.value})} />
-        </div>
       </div>
       <div className="card">
         <div className="card-title">Client</div>
@@ -396,20 +391,7 @@ export default function AdminDashboard({ user }) {
         <h2>{selected.ref}</h2>
         <span className="badge" style={{background:sc(selected.statut),color:st(selected.statut)}}>{selected.statut}</span>
         {selected.statut === "planifié" && !editMode && (
-          <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={() => {
-            setEditForm({
-              clientNom:selected.clientNom, clientPrenom:selected.clientPrenom,
-              clientTel:selected.clientTel, clientEmail:selected.clientEmail,
-              adresseFacturation:selected.adresseFacturation||"",
-              adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",
-              demandeClient:selected.demandeClient||"", numDevis:selected.numDevis||"",
-              signataire:selected.signataire||"", datePrevue:selected.datePrevue,
-              heurePrevue:selected.heurePrevue, techId:selected.techNom,
-              types:selected.types||[],
-              montantFacture:selected.montantFacture||"", // 👈 NOUVEAU
-            });
-            setEditMode(true);
-          }}>Modifier</button>
+          <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={() => { setEditForm({ clientNom:selected.clientNom, clientPrenom:selected.clientPrenom, clientTel:selected.clientTel, clientEmail:selected.clientEmail, adresseFacturation:selected.adresseFacturation||"" , adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"", demandeClient:selected.demandeClient||"", numDevis:selected.numDevis||"", signataire:selected.signataire||"", datePrevue:selected.datePrevue, heurePrevue:selected.heurePrevue, techId:selected.techNom, types:selected.types||[] }); setEditMode(true); }}>Modifier</button>
         )}
         <button style={{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12,marginLeft:"auto"}} onClick={() => setConfirmDelete(true)}>Supprimer</button>
       </div>
@@ -420,10 +402,6 @@ export default function AdminDashboard({ user }) {
         <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
         <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
-        {/* 👇 NOUVEAU */}
-        {selected.montantFacture && (
-          <div className="info-row"><span>Montant facturé</span><b style={{color:"#1a7a65"}}>{parseFloat(selected.montantFacture).toFixed(2)} €</b></div>
-        )}
       </div>
 
       <div className="card">
