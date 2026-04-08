@@ -7,6 +7,7 @@ import logoBase64 from "../logoBase64";
 const EMAILJS_SERVICE = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
 const EMAILJS_KEY = "JPyrwrjE8dQD_dT0a";
+const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbzX15sQS0XdFhqlAL_wvA9ATgzbyESLi7N21msXAg4Z1Bv1TAcYvHsgaHyGpMbLOgvg/exec";
 
 export default function TechDashboard({ user }) {
   const [bons, setBons] = useState([]);
@@ -105,6 +106,7 @@ export default function TechDashboard({ user }) {
     if (selected.clientEmail) {
       await sendEmail(fullBon);
     }
+    await sendToDrive(fullBon);
     setSaving(false);
     setShowChecklist(false);
     setShowSuccess(true);
@@ -140,22 +142,13 @@ export default function TechDashboard({ user }) {
       doc2.setDrawColor(53,180,153); doc2.line(ml, y, mr, y); y += 5;
       doc2.setTextColor(60,60,60); doc2.setFont("helvetica","normal"); doc2.setFontSize(10);
     };
-    const row = (label, val, wrap = false) => {
-      const text = label + " : " + (val || "—");
-      if (wrap) {
-        const lines = doc2.splitTextToSize(text, mr - ml);
-        doc2.text(lines, ml, y);
-        y += lines.length * 6;
-      } else {
-        doc2.text(text, ml, y); y += 6;
-      }
-    };
+    const row = (label, val) => { doc2.text(label + " : " + (val || "—"), ml, y); y += 6; };
 
     section("COLLABORATEUR"); row("Nom", bon.techNom); y += 2;
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
-    row("Adresse", bon.clientAdresse, true); y += 2;
+    row("Adresse", bon.clientAdresse); y += 2;
     section("INTERVENTION");
     row("Type", bon.type);
     row("Prévu le", bon.datePrevue + " à " + bon.heurePrevue);
@@ -176,14 +169,50 @@ export default function TechDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml,y,80,30); }
     if (bon.signatureClient) { try { doc2.addImage(bon.signatureClient,"PNG",ml+90,y,80,30); } catch(e){} }
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
-    y += 32;
-    doc2.setTextColor(100,100,100); doc2.setFontSize(8);
-    if (bon.signataire) doc2.text("Signataire : " + bon.signataire, ml+90, y);
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
 
     if (autoSave) doc2.save("bon-" + bon.ref + ".pdf");
     return doc2.output("datauristring");
+  };
+
+  const sendToDrive = async (bon) => {
+    if (!DRIVE_WEBHOOK || DRIVE_WEBHOOK.includes("COLLER_ICI")) return;
+    try {
+      const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
+      await fetch(DRIVE_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ref:                bon.ref,
+          numDevis:           bon.numDevis || "",
+          clientNom:          bon.clientNom,
+          clientPrenom:       bon.clientPrenom,
+          clientTel:          bon.clientTel || "",
+          clientEmail:        bon.clientEmail || "",
+          adresseFacturation: bon.adresseFacturation || "",
+          adresseIntervention:bon.adresseIntervention || bon.clientAdresse || "",
+          signataire:         bon.signataire || "",
+          demandeClient:      bon.demandeClient || "",
+          type:               bon.type,
+          datePrevue:         bon.datePrevue,
+          heurePrevue:        bon.heurePrevue,
+          heureArrivee:       fmt(bon.heureArrivee),
+          heureFin:           fmt(bon.heureFin),
+          duree:              bon.heureArrivee && bon.heureFin ? (() => {
+            const diff = (bon.heureFin.toDate ? bon.heureFin.toDate() : bon.heureFin) - (bon.heureArrivee.toDate ? bon.heureArrivee.toDate() : bon.heureArrivee);
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
+          })() : "—",
+          techNom:            bon.techNom,
+          obsCocon:           bon.obsCocon || "",
+          obsClient:          bon.obsClient || "",
+        }),
+      });
+    } catch(e) {
+      console.warn("Drive webhook error:", e);
+    }
   };
 
   const sendEmail = async (bon) => {
@@ -442,10 +471,10 @@ export default function TechDashboard({ user }) {
                     />
                   </div>
                 )}
-                {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut === "terminé" && selected.signataire && (
-                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:4,fontStyle:"italic"}}>{selected.signataire}</p>
+                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>
                 )}
+                {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
               </div>
             </div>
