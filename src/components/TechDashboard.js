@@ -182,7 +182,8 @@ export default function TechDashboard({ user }) {
       const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
       await fetch(DRIVE_WEBHOOK, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain" },
         body: JSON.stringify({
           ref:                bon.ref,
           numDevis:           bon.numDevis || "",
