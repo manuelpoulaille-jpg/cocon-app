@@ -179,37 +179,16 @@ export default function TechDashboard({ user }) {
   const sendToDrive = async (bon) => {
     if (!DRIVE_WEBHOOK || DRIVE_WEBHOOK.includes("COLLER_ICI")) return;
     try {
-      const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
+      // Générer le PDF avec jsPDF (même rendu que l'app)
+      const pdfDataUri = await generatePDF(bon, false);
+      const base64 = pdfDataUri.split(",")[1];
+      const nom = (bon.ref + "_" + bon.clientNom + "_" + bon.clientPrenom + "_" + bon.datePrevue + ".pdf")
+        .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
       await fetch(DRIVE_WEBHOOK, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          ref:                bon.ref,
-          numDevis:           bon.numDevis || "",
-          clientNom:          bon.clientNom,
-          clientPrenom:       bon.clientPrenom,
-          clientTel:          bon.clientTel || "",
-          clientEmail:        bon.clientEmail || "",
-          adresseFacturation: bon.adresseFacturation || "",
-          adresseIntervention:bon.adresseIntervention || bon.clientAdresse || "",
-          signataire:         bon.signataire || "",
-          demandeClient:      bon.demandeClient || "",
-          type:               bon.type,
-          datePrevue:         bon.datePrevue,
-          heurePrevue:        bon.heurePrevue,
-          heureArrivee:       fmt(bon.heureArrivee),
-          heureFin:           fmt(bon.heureFin),
-          duree:              bon.heureArrivee && bon.heureFin ? (() => {
-            const diff = (bon.heureFin.toDate ? bon.heureFin.toDate() : bon.heureFin) - (bon.heureArrivee.toDate ? bon.heureArrivee.toDate() : bon.heureArrivee);
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
-          })() : "—",
-          techNom:            bon.techNom,
-          obsCocon:           bon.obsCocon || "",
-          obsClient:          bon.obsClient || "",
-        }),
+        body: JSON.stringify({ pdf: base64, nom }),
       });
     } catch(e) {
       console.warn("Drive webhook error:", e);
