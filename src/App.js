@@ -7,15 +7,49 @@ import TechDashboard from "./components/TechDashboard";
 import CarburantModule from "./components/CarburantModule";
 import "./App.css";
 
+const IconBons = ({ active }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#2a9d8f" : "#9ca3af"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <line x1="16" y1="13" x2="8" y2="13"/>
+    <line x1="16" y1="17" x2="8" y2="17"/>
+  </svg>
+);
+
+const IconCarburant = ({ active }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#2a9d8f" : "#9ca3af"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 22V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/>
+    <line x1="3" y1="22" x2="15" y2="22"/>
+    <rect x="6" y="10" width="6" height="4" rx="1"/>
+    <path d="M15 8h2a2 2 0 0 1 2 2v6a2 2 0 0 0 4 0V9.83a2 2 0 0 0-.59-1.42L21 7"/>
+  </svg>
+);
+
+const IconStock = ({ active }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#2a9d8f" : "#9ca3af"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+    <line x1="12" y1="22.08" x2="12" y2="12"/>
+  </svg>
+);
+
+const IconLogout = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+    <polyline points="16 17 21 12 16 7"/>
+    <line x1="21" y1="12" x2="9" y2="12"/>
+  </svg>
+);
+
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [activePage, setActivePage] = useState("dashboard"); // "dashboard" | "carburant"
+  const [user, setUser]             = useState(null);
+  const [role, setRole]             = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
+  const [error, setError]           = useState("");
+  const [loggingIn, setLoggingIn]   = useState(false);
+  const [activePage, setActivePage] = useState("dashboard");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -43,6 +77,16 @@ export default function App() {
     }
     setLoggingIn(false);
   };
+
+  const adminTabs = [
+    { id: "dashboard", label: "Bons",      Icon: IconBons },
+    { id: "carburant", label: "Carburant", Icon: IconCarburant },
+    { id: "stock",     label: "Stock",     Icon: IconStock },
+  ];
+  const collabTabs = [
+    { id: "dashboard", label: "Bons", Icon: IconBons },
+  ];
+  const tabs = role === "admin" ? adminTabs : collabTabs;
 
   if (loading) return (
     <div className="loading-screen">
@@ -79,65 +123,72 @@ export default function App() {
 
   return (
     <div className="app-root">
+
+      {/* ── HEADER ── */}
       <header className="app-header">
         <div className="header-left">
-          <img src="/logo.png" alt="Cocon+" style={{height:40,objectFit:"contain",marginRight:8,background:"white",borderRadius:8,padding:"3px 6px"}} />
-          <div>
-            <span className="header-role" style={{color:"rgba(255,255,255,0.9)",fontSize:12}}>
-              {role === "admin" ? "Administration" : "Collaborateur"}
-            </span>
-          </div>
+          <img src="/logo.png" alt="Cocon+"
+            style={{height:34,objectFit:"contain",marginRight:8,background:"white",borderRadius:8,padding:"3px 6px",flexShrink:0}} />
+          <span style={{color:"rgba(255,255,255,0.85)",fontSize:12,fontWeight:500,whiteSpace:"nowrap"}}>
+            {role === "admin" ? "Administration" : "Collaborateur"}
+          </span>
         </div>
 
-        {/* ── Navigation ── */}
-        <nav style={{display:"flex",gap:6}}>
-          <button
-            onClick={() => setActivePage("dashboard")}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 20,
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-              background: activePage === "dashboard" ? "#fff" : "rgba(255,255,255,0.18)",
-              color:      activePage === "dashboard" ? "#1f7a6e" : "#fff",
-            }}
-          >
-            🏠 Bons
-          </button>
-          {role === "admin" && (
-            <button
-              onClick={() => setActivePage("carburant")}
+        {/* Navigation desktop — cachée sur mobile via CSS */}
+        <nav className="desktop-nav">
+          {tabs.map(({ id, label, Icon }) => (
+            <button key={id} onClick={() => setActivePage(id)}
               style={{
-                padding: "6px 14px",
-                borderRadius: 20,
-                border: "none",
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: 13,
-                background: activePage === "carburant" ? "#fff" : "rgba(255,255,255,0.18)",
-                color:      activePage === "carburant" ? "#1f7a6e" : "#fff",
-              }}
-            >
-              ⛽ Carburant
+                display:"flex", alignItems:"center", gap:6,
+                padding:"6px 14px", borderRadius:20, border:"none",
+                cursor:"pointer", fontWeight:600, fontSize:13,
+                background: activePage === id ? "#fff" : "rgba(255,255,255,0.15)",
+                color:      activePage === id ? "#1f7a6e" : "#fff",
+                transition: "all .2s",
+              }}>
+              <Icon active={activePage === id} />
+              {label}
             </button>
-          )}
+          ))}
         </nav>
 
-        <button className="btn-logout" onClick={() => signOut(auth)}>Déconnexion</button>
+        <button className="btn-logout" onClick={() => signOut(auth)}>
+          <span className="logout-label">Déconnexion</span>
+        </button>
       </header>
 
+      {/* ── CONTENU ── */}
       <main className="app-main">
         {activePage === "dashboard" && (
-          role === "admin"
-            ? <AdminDashboard user={user} />
-            : <TechDashboard user={user} />
+          role === "admin" ? <AdminDashboard user={user} /> : <TechDashboard user={user} />
         )}
         {activePage === "carburant" && role === "admin" && (
           <CarburantModule user={user} />
         )}
+        {activePage === "stock" && role === "admin" && (
+          <div className="container" style={{textAlign:"center",paddingTop:"3rem",color:"#6b7280"}}>
+            <div style={{fontSize:48,marginBottom:16}}>📦</div>
+            <h2 style={{color:"#2a9d8f",marginBottom:8}}>Module Stock</h2>
+            <p style={{fontSize:14}}>Bientôt disponible</p>
+          </div>
+        )}
       </main>
+
+      {/* ── NAVIGATION BAS — mobile uniquement ── */}
+      <nav className="bottom-nav">
+        {tabs.map(({ id, label, Icon }) => (
+          <button key={id} onClick={() => setActivePage(id)}
+            className={`bottom-nav-btn ${activePage === id ? "active" : ""}`}>
+            <Icon active={activePage === id} />
+            <span>{label}</span>
+          </button>
+        ))}
+        <button className="bottom-nav-btn" onClick={() => signOut(auth)}>
+          <IconLogout />
+          <span>Quitter</span>
+        </button>
+      </nav>
+
     </div>
   );
 }
