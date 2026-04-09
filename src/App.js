@@ -41,6 +41,52 @@ const IconLogout = () => (
   </svg>
 );
 
+// ── Pull-to-refresh ──────────────────────────────────────────────────────────
+function usePullToRefresh(onRefresh) {
+  const [pulling, setPulling] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const startY = React.useRef(null);
+  const THRESHOLD = 80;
+
+  React.useEffect(() => {
+    const el = document.querySelector(".app-main");
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      if (el.scrollTop === 0) startY.current = e.touches[0].clientY;
+    };
+
+    const onTouchMove = (e) => {
+      if (startY.current === null) return;
+      const delta = e.touches[0].clientY - startY.current;
+      if (delta > 0) {
+        e.preventDefault();
+        const pct = Math.min(delta / THRESHOLD, 1);
+        setProgress(pct);
+        setPulling(delta >= THRESHOLD);
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (pulling) onRefresh();
+      startY.current = null;
+      setProgress(0);
+      setPulling(false);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [pulling, onRefresh]);
+
+  return { pulling, progress };
+}
+
 export default function App() {
   const [user, setUser]             = useState(null);
   const [role, setRole]             = useState(null);
@@ -156,6 +202,37 @@ export default function App() {
           <span className="logout-label">Déconnexion</span>
         </button>
       </header>
+
+      {/* ── Indicateur pull-to-refresh ── */}
+      {(pulling || progress > 0 || refreshing) && (
+        <div style={{
+          position:"fixed", top:56, left:0, right:0, zIndex:99,
+          display:"flex", justifyContent:"center", alignItems:"center",
+          paddingTop: 8,
+          pointerEvents:"none",
+        }}>
+          <div style={{
+            width: 36, height: 36,
+            borderRadius: "50%",
+            background: "#fff",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            transform: refreshing ? "none" : `scale(${0.5 + progress * 0.5})`,
+            transition: refreshing ? "none" : "transform .1s",
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#2a9d8f" strokeWidth="2.5" strokeLinecap="round"
+              style={{
+                animation: refreshing ? "spin 0.8s linear infinite" : "none",
+                transform: refreshing ? "none" : `rotate(${progress * 360}deg)`,
+              }}>
+              <path d="M23 4v6h-6"/>
+              <path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </div>
+        </div>
+      )}
 
       {/* ── CONTENU ── */}
       <main className="app-main">
