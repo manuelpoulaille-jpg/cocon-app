@@ -8,6 +8,8 @@ const TYPES = [
   "Traitement anti-chauves-souris","Désinfection","Étanchéité / Toiture"
 ];
 
+const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
+
 export default function AdminDashboard({ user }) {
   const [bons, setBons] = useState([]);
   const [view, setView] = useState("dashboard");
@@ -19,6 +21,8 @@ export default function AdminDashboard({ user }) {
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [driveProgress, setDriveProgress] = useState(null); // null | { total, done, errors }
+  const [driveSending, setDriveSending] = useState(false);
   const [form, setForm] = useState({
     clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
     adresseFacturation:"", adresseIntervention:"",
@@ -27,6 +31,46 @@ export default function AdminDashboard({ user }) {
   });
 
   useEffect(() => { fetchBons(); }, []);
+
+  const sendBonsToDrive = async () => {
+    // Bons terminés non encore envoyés dans Drive
+    const aEnvoyer = bons.filter(b => b.statut === "terminé" && !b.driveEnvoye);
+    if (aEnvoyer.length === 0) {
+      alert("Tous les bons terminés ont déjà été envoyés vers Drive !");
+      return;
+    }
+    setDriveSending(true);
+    setDriveProgress({ total: aEnvoyer.length, done: 0, errors: 0 });
+    let done = 0, errors = 0;
+    for (const bon of aEnvoyer) {
+      try {
+        const pdfDataUri = await downloadPDF(bon, false);
+        const base64 = pdfDataUri.split(",")[1];
+        const nom = (bon.ref + "_" + bon.clientNom + "_" + bon.clientPrenom + "_" + bon.datePrevue + ".pdf")
+          .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
+        await fetch(DRIVE_WEBHOOK, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({ pdf: base64, nom }),
+        });
+        await updateDoc(doc(db, "bons", bon.id), { driveEnvoye: true });
+        done++;
+      } catch(e) {
+        console.warn("Erreur Drive pour", bon.ref, e);
+        errors++;
+      }
+      setDriveProgress({ total: aEnvoyer.length, done: done + errors, errors });
+    }
+    await fetchBons();
+    setDriveSending(false);
+    setDriveProgress(null);
+    setMsg(errors === 0
+      ? `✅ ${done} bon${done > 1 ? "s" : ""} envoyé${done > 1 ? "s" : ""} vers Drive !`
+      : `⚠️ ${done} envoyé${done > 1 ? "s" : ""}, ${errors} erreur${errors > 1 ? "s" : ""}`
+    );
+    setTimeout(() => setMsg(""), 5000);
+  };
 
   const fetchBons = async () => {
     const q = query(collection(db, "bons"), orderBy("createdAt", "desc"));
@@ -143,7 +187,7 @@ export default function AdminDashboard({ user }) {
     return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
   };
 
-  const downloadPDF = async (bon) => {
+  const downloadPDF = async (bon, autoSave = true) => {
     const { jsPDF } = await import("jspdf");
     const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const W = 210, ml = 15, mr = 195;
@@ -197,7 +241,8 @@ export default function AdminDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
-    doc2.save("bon-" + bon.ref + ".pdf");
+    if (autoSave) doc2.save("bon-" + bon.ref + ".pdf");
+    return doc2.output("datauristring");
   };
 
   const stats = {
@@ -499,7 +544,26 @@ export default function AdminDashboard({ user }) {
       <div className="dash-actions">
         <button className="btn-primary" onClick={() => setView("new")}>+ Nouveau bon d'intervention</button>
         <button className="btn-outline" onClick={() => setView("list")}>Tous les bons</button>
+        <button className="btn-outline" onClick={sendBonsToDrive} disabled={driveSending}
+          style={{background:"#e8f5f3",color:"#1f7a6e",border:"1px solid #2a9d8f"}}>
+          {driveSending ? "Envoi en cours…" : "📤 Envoyer vers Drive"}
+        </button>
       </div>
+      {driveProgress && (
+        <div style={{margin:"10px 0",padding:"12px 16px",background:"#e8f5f3",borderRadius:10,border:"1px solid #2a9d8f"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6,fontSize:13,fontWeight:600,color:"#1f7a6e"}}>
+            <span>Envoi vers Drive…</span>
+            <span>{driveProgress.done} / {driveProgress.total}</span>
+          </div>
+          <div style={{height:8,background:"#d0ede8",borderRadius:99,overflow:"hidden"}}>
+            <div style={{height:"100%",borderRadius:99,background:"#2a9d8f",transition:"width .3s",
+              width:(driveProgress.done / driveProgress.total * 100) + "%"}} />
+          </div>
+          {driveProgress.errors > 0 && (
+            <p style={{fontSize:11,color:"#e76f51",marginTop:4}}>{driveProgress.errors} erreur(s)</p>
+          )}
+        </div>
+      )}
       <div className="card" style={{marginTop:"1rem"}}>
         <div className="card-title">Bons du jour</div>
         {bons.filter(b => b.datePrevue === today).length === 0
