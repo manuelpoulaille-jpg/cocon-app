@@ -7,7 +7,7 @@ import logoBase64 from "../logoBase64";
 const EMAILJS_SERVICE = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
 const EMAILJS_KEY = "JPyrwrjE8dQD_dT0a";
-const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbzX15sQS0XdFhqlAL_wvA9ATgzbyESLi7N21msXAg4Z1Bv1TAcYvHsgaHyGpMbLOgvg/exec";
+const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
 
 export default function TechDashboard({ user }) {
   const [bons, setBons] = useState([]);
