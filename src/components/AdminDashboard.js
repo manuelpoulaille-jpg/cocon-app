@@ -45,8 +45,10 @@ export default function AdminDashboard({ user }) {
     for (const bon of aEnvoyer) {
       try {
         const pdfDataUri = await downloadPDF(bon, false);
+        if (!pdfDataUri) throw new Error("PDF vide");
         const base64 = pdfDataUri.split(",")[1];
-        const nom = (bon.ref + "_" + bon.clientNom + "_" + bon.clientPrenom + "_" + bon.datePrevue + ".pdf")
+        const ref    = bon.ref || "INCONNU";
+        const nom    = (ref + "_" + (bon.clientNom || "X") + "_" + (bon.clientPrenom || "X") + "_" + (bon.datePrevue || "0000-00-00") + ".pdf")
           .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
         await fetch(DRIVE_WEBHOOK, {
           method: "POST",
@@ -54,6 +56,8 @@ export default function AdminDashboard({ user }) {
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify({ pdf: base64, nom }),
         });
+        // Pause pour éviter le rate limiting Google Apps Script
+        await new Promise(r => setTimeout(r, 800));
         await updateDoc(doc(db, "bons", bon.id), { driveEnvoye: true });
         done++;
       } catch(e) {
