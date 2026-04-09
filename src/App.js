@@ -96,6 +96,16 @@ export default function App() {
   const [error, setError]           = useState("");
   const [loggingIn, setLoggingIn]   = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
+  const [refreshing, setRefreshing]   = useState(false);
+
+  const handleRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await new Promise(r => setTimeout(r, 700));
+    setRefreshing(false);
+    setActivePage(p => { setTimeout(() => setActivePage(p), 0); return "__refresh__"; });
+  }, []);
+
+  const { pulling, progress } = usePullToRefresh(handleRefresh);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
