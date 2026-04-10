@@ -27,7 +27,8 @@ export default function AdminDashboard({ user }) {
     clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
     adresseFacturation:"", adresseIntervention:"",
     demandeClient:"", numDevis:"", signataire:"",
-    types:[], datePrevue:"", heurePrevue:"", techId:""
+    types:[], datePrevue:"", heurePrevue:"", techId:"",
+    numVisite:"1",
   });
 
   useEffect(() => { fetchBons(); }, []);
@@ -120,6 +121,7 @@ export default function AdminDashboard({ user }) {
         signatureClient:     null,
         emailEnvoye:         false,
         montantFacture:      form.montantFacture ? parseFloat(form.montantFacture) : null,
+        numVisite:           form.numVisite || "1",
       });
       await fetchBons();
       setForm({
@@ -127,7 +129,7 @@ export default function AdminDashboard({ user }) {
         adresseFacturation:"", adresseIntervention:"",
         demandeClient:"", numDevis:"", signataire:"",
         types:[], datePrevue:"", heurePrevue:"", techId:"",
-        montantFacture:"",
+        montantFacture:"", numVisite:"1",
       });
       setMsg("Bon créé !");
       setView("dashboard");
@@ -212,6 +214,7 @@ export default function AdminDashboard({ user }) {
     section("INFORMATIONS");
     row("Référence", bon.ref);
     if (bon.numDevis) row("N° Devis", bon.numDevis);
+    if (bon.numVisite) row("N° Visite", bon.numVisite);
     row("Collaborateur", bon.techNom); y += 2;
     section("CLIENT");
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
@@ -305,6 +308,15 @@ export default function AdminDashboard({ user }) {
           <div className="row2">
             <div className="field"><label>N° Devis</label><input value={form.numDevis} onChange={e=>setForm({...form,numDevis:e.target.value})} placeholder="ex: DEV-2026-001" /></div>
             <div className="field"><label>Date prévue</label><input type="date" required value={form.datePrevue} onChange={e=>setForm({...form,datePrevue:e.target.value})} /></div>
+          </div>
+          <div className="row2">
+            <div className="field">
+              <label>N° de visite <span style={{fontWeight:400,fontSize:12,color:"#888"}}>ex: 1, 2/3, 3/3</span></label>
+              <input value={form.numVisite} onChange={e=>setForm({...form,numVisite:e.target.value})} placeholder="1" />
+            </div>
+            <div className="field"><label>Montant facturé (€) <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel</span></label>
+              <input type="number" step="0.01" placeholder="ex : 250.00" value={form.montantFacture} onChange={e=>setForm({...form,montantFacture:e.target.value})} />
+            </div>
           </div>
           <div className="row2">
             <div className="field"><label>Heure prévue</label><input type="time" required value={form.heurePrevue} onChange={e=>setForm({...form,heurePrevue:e.target.value})} /></div>
@@ -446,6 +458,15 @@ export default function AdminDashboard({ user }) {
       <div className="card">
         <div className="card-title">Informations générales</div>
         {selected.numDevis && <div className="info-row"><span>N° Devis</span><b>{selected.numDevis}</b></div>}
+        {selected.numVisite && <div className="info-row"><span>N° Visite</span><b style={{color:"#2a9d8f"}}>{selected.numVisite}</b></div>}
+        {selected.visiteSupplementaire !== undefined && (
+          <div className="info-row">
+            <span>Visite suivante</span>
+            <b style={{color: selected.visiteSupplementaire ? "#e76f51" : "#16a34a"}}>
+              {selected.visiteSupplementaire ? "⚠️ Oui — à planifier" : "✅ Non"}
+            </b>
+          </div>
+        )}
         <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
         <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
@@ -457,8 +478,24 @@ export default function AdminDashboard({ user }) {
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
         {selected.signataire && <div className="info-row"><span>Signataire</span><b>{selected.signataire}</b></div>}
-        <div className="info-row"><span>Adresse facturation</span><b>{selected.adresseFacturation || "—"}</b></div>
-        <div className="info-row"><span>Adresse intervention</span><b>{selected.adresseIntervention || selected.clientAdresse || "—"}</b></div>
+        <div className="info-row"><span>Adresse facturation</span><b>
+          {selected.adresseFacturation ? (
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseFacturation)}`}
+              target="_blank" rel="noreferrer"
+              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer"}}>
+              {selected.adresseFacturation} 📍
+            </a>
+          ) : "—"}
+        </b></div>
+        <div className="info-row"><span>Adresse intervention</span><b>
+          {selected.adresseIntervention || selected.clientAdresse ? (
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention || selected.clientAdresse)}`}
+              target="_blank" rel="noreferrer"
+              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer"}}>
+              {selected.adresseIntervention || selected.clientAdresse} 📍
+            </a>
+          ) : "—"}
+        </b></div>
       </div>
 
       {selected.demandeClient && (

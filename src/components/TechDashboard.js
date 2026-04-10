@@ -95,7 +95,8 @@ export default function TechDashboard({ user }) {
       signatureClient: sigClient,
       geoFin: geo,
       signataire: signataireNom || selected.signataire || "",
-      checklist: checklist
+      checklist: checklist,
+      visiteSupplementaire: visiteSupplementaire,
     };
     await updateDoc(doc(db, "bons", selected.id), bonData);
     const fullBon = { ...selected, ...bonData };
@@ -219,6 +220,8 @@ export default function TechDashboard({ user }) {
     { id: "signature", label: "Bon signé par le client", required: true },
   ];
 
+  const [visiteSupplementaire, setVisiteSupplementaire] = useState(null); // null | true | false
+
   const checklistValid = CHECKLIST.filter(i => i.required).every(i => checklist[i.id]);
 
   if (showChecklist) return (
@@ -248,12 +251,40 @@ export default function TechDashboard({ user }) {
           Les points obligatoires doivent être cochés pour terminer.
         </p>
       </div>
+      {/* Question visite suivante */}
+      <div className="card" style={{marginTop:"0.5rem"}}>
+        <div className="card-title">Une autre visite sera-t-elle nécessaire ?</div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={() => setVisiteSupplementaire(true)}
+            style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",
+              borderColor:visiteSupplementaire===true?"#e76f51":"#e0e0e0",
+              background:visiteSupplementaire===true?"#fff4f0":"white",
+              color:visiteSupplementaire===true?"#e76f51":"#888",
+              fontWeight:600,cursor:"pointer",fontSize:14}}>
+            Oui
+          </button>
+          <button onClick={() => setVisiteSupplementaire(false)}
+            style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",
+              borderColor:visiteSupplementaire===false?"#2a9d8f":"#e0e0e0",
+              background:visiteSupplementaire===false?"#e8f5f3":"white",
+              color:visiteSupplementaire===false?"#2a9d8f":"#888",
+              fontWeight:600,cursor:"pointer",fontSize:14}}>
+            Non
+          </button>
+        </div>
+      </div>
+
       {!checklistValid && (
         <p style={{color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:8}}>
           ⚠️ Veuillez cocher tous les points obligatoires
         </p>
       )}
-      <button className="btn-finish" style={{width:"100%",opacity:checklistValid ? 1 : 0.4}} disabled={saving || !checklistValid} onClick={terminer}>
+      {visiteSupplementaire === null && (
+        <p style={{color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:8}}>
+          ⚠️ Veuillez répondre à la question sur la visite suivante
+        </p>
+      )}
+      <button className="btn-finish" style={{width:"100%",opacity:(checklistValid && visiteSupplementaire !== null) ? 1 : 0.4}} disabled={saving || !checklistValid || visiteSupplementaire === null} onClick={terminer}>
         {saving ? "Finalisation…" : "✅ Terminer le chantier"}
       </button>
     </div>
@@ -348,7 +379,15 @@ export default function TechDashboard({ user }) {
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
-        <div className="info-row"><span>Adresse</span><b>{selected.clientAdresse}</b></div>
+        <div className="info-row"><span>Adresse</span><b>
+          {selected.adresseIntervention || selected.clientAdresse ? (
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention || selected.clientAdresse)}`}
+              target="_blank" rel="noreferrer"
+              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer"}}>
+              {selected.adresseIntervention || selected.clientAdresse} 📍
+            </a>
+          ) : "—"}
+        </b></div>
       </div>
 
       <div className="card readonly">
@@ -356,6 +395,7 @@ export default function TechDashboard({ user }) {
         <div className="info-row"><span>Type</span><b>{selected.type}</b></div>
         <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
+        {selected.numVisite && <div className="info-row"><span>N° Visite</span><b style={{color:"#2a9d8f"}}>{selected.numVisite}</b></div>}
       </div>
 
       {selected.demandeClient && (
@@ -383,9 +423,13 @@ export default function TechDashboard({ user }) {
         )}
         <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
           {selected.statut === "planifié" && (
-            <button className="btn-arrive" disabled={saving} onClick={arriver}>
-              📍 Arrivé sur le chantier
-            </button>
+            bons.some(b => b.statut === "en cours" && b.id !== selected.id)
+              ? <p style={{color:"#e76f51",fontSize:13,fontWeight:600,padding:"10px 14px",background:"#fff4f0",borderRadius:8,width:"100%",textAlign:"center"}}>
+                  ⚠️ Vous avez déjà une intervention en cours.
+                </p>
+              : <button className="btn-arrive" disabled={saving} onClick={arriver}>
+                  📍 Arrivé sur le chantier
+                </button>
           )}
           {selected.statut === "terminé" && selected.emailEnvoye && (
             <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
