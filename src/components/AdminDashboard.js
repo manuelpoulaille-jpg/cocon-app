@@ -45,10 +45,8 @@ export default function AdminDashboard({ user }) {
     for (const bon of aEnvoyer) {
       try {
         const pdfDataUri = await downloadPDF(bon, false);
-        if (!pdfDataUri) throw new Error("PDF vide");
         const base64 = pdfDataUri.split(",")[1];
-        const ref    = bon.ref || "INCONNU";
-        const nom    = (ref + "_" + (bon.clientNom || "X") + "_" + (bon.clientPrenom || "X") + "_" + (bon.datePrevue || "0000-00-00") + ".pdf")
+        const nom = (bon.ref + "_" + bon.clientNom + "_" + bon.clientPrenom + "_" + bon.datePrevue + ".pdf")
           .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
         await fetch(DRIVE_WEBHOOK, {
           method: "POST",
@@ -56,8 +54,6 @@ export default function AdminDashboard({ user }) {
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify({ pdf: base64, nom }),
         });
-        // Pause pour éviter le rate limiting Google Apps Script
-        await new Promise(r => setTimeout(r, 800));
         await updateDoc(doc(db, "bons", bon.id), { driveEnvoye: true });
         done++;
       } catch(e) {
@@ -245,7 +241,9 @@ export default function AdminDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
-    if (autoSave) doc2.save("bon-" + bon.ref + ".pdf");
+    const nomFichier = (bon.ref + "_" + (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase() + "_" + (bon.datePrevue||"") + ".pdf")
+      .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
+    if (autoSave) doc2.save(nomFichier);
     return doc2.output("datauristring");
   };
 

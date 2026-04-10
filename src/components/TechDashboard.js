@@ -7,7 +7,6 @@ import logoBase64 from "../logoBase64";
 const EMAILJS_SERVICE = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
 const EMAILJS_KEY = "JPyrwrjE8dQD_dT0a";
-const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
 
 export default function TechDashboard({ user }) {
   const [bons, setBons] = useState([]);
@@ -106,7 +105,6 @@ export default function TechDashboard({ user }) {
     if (selected.clientEmail) {
       await sendEmail(fullBon);
     }
-    await sendToDrive(fullBon);
     setSaving(false);
     setShowChecklist(false);
     setShowSuccess(true);
@@ -172,30 +170,13 @@ export default function TechDashboard({ user }) {
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
 
-    if (autoSave) doc2.save("bon-" + bon.ref + ".pdf");
+    const nomFichier = (bon.ref + "_" + (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase() + "_" + (bon.datePrevue||"") + ".pdf")
+      .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
+    if (autoSave) doc2.save(nomFichier);
     return doc2.output("datauristring");
   };
 
-  const sendToDrive = async (bon) => {
-    if (!DRIVE_WEBHOOK || DRIVE_WEBHOOK.includes("COLLER_ICI")) return;
-    try {
-      // Générer le PDF avec jsPDF (même rendu que l'app)
-      const pdfDataUri = await generatePDF(bon, false);
-      const base64 = pdfDataUri.split(",")[1];
-      const nom = (bon.ref + "_" + bon.clientNom + "_" + bon.clientPrenom + "_" + bon.datePrevue + ".pdf")
-        .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
-      await fetch(DRIVE_WEBHOOK, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({ pdf: base64, nom }),
-      });
-    } catch(e) {
-      console.warn("Drive webhook error:", e);
-    }
-  };
-
-  const sendEmail = async (bon) => {
+  const sendToDrive = async (bon=> {
     const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
     setEmailStatus("sending");
     try {
