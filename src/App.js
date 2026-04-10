@@ -116,12 +116,8 @@ export default function App() {
           role === "admin" ? <AdminDashboard user={user} /> : <TechDashboard user={user} />
         )}
         {activePage === "carburant" && role === "admin" && <CarburantModule user={user} />}
-        {activePage === "stock"     && role === "admin" && (
-          <div className="container" style={{textAlign:"center",paddingTop:"3rem",color:"#6b7280"}}>
-            <div style={{fontSize:48,marginBottom:16}}>📦</div>
-            <h2 style={{color:"#2a9d8f",marginBottom:8}}>Module Stock</h2>
-            <p style={{fontSize:14}}>Bientôt disponible</p>
-          </div>
+        {activePage === "stock" && role === "admin" && (
+          <StockModule user={user} role={role} />
         )}
       </main>
 
