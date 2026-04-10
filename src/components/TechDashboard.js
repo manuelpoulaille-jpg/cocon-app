@@ -176,7 +176,7 @@ export default function TechDashboard({ user }) {
     return doc2.output("datauristring");
   };
 
-  const sendToDrive = async (bon=> {
+  const sendEmail = async (bon) => {
     const fmt = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
     setEmailStatus("sending");
     try {
