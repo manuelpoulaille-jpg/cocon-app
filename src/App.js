@@ -5,6 +5,7 @@ import { doc, getDoc } from "firebase/firestore";
 import AdminDashboard from "./components/AdminDashboard";
 import TechDashboard from "./components/TechDashboard";
 import CarburantModule from "./components/CarburantModule";
+import StockModule from "./components/StockModule";
 import "./App.css";
 
 export default function App() {
