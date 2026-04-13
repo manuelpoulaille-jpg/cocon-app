@@ -145,6 +145,7 @@ export default function TechDashboard({ user }) {
 
     section("COLLABORATEUR"); row("Nom", bon.techNom); y += 2;
     section("CLIENT");
+    if (bon.clientSociete) row("Société", bon.clientSociete);
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
     row("Adresse", bon.clientAdresse); y += 2;
@@ -171,7 +172,10 @@ export default function TechDashboard({ user }) {
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
 
-    const nomFichier = (bon.ref + "_" + (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase() + "_" + (bon.datePrevue||"") + ".pdf")
+    const clientLabel = bon.clientSociete
+      ? bon.clientSociete.toUpperCase()
+      : (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase();
+    const nomFichier = (bon.ref + "_" + clientLabel + "_" + (bon.datePrevue||"") + ".pdf")
       .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
     if (autoSave) doc2.save(nomFichier);
     return doc2.output("datauristring");
@@ -183,6 +187,7 @@ export default function TechDashboard({ user }) {
     try {
       await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
         to_email: bon.clientEmail,
+        client_societe: bon.clientSociete || "",
         client_nom: bon.clientNom + " " + bon.clientPrenom,
         client_tel: bon.clientTel || "—",
         client_email: bon.clientEmail || "—",
@@ -376,6 +381,7 @@ export default function TechDashboard({ user }) {
 
       <div className="card readonly">
         <div className="card-title">Client <span className="locked-badge">🔒 Admin</span></div>
+        {selected.clientSociete && <div className="info-row"><span>Société</span><b>{selected.clientSociete}</b></div>}
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>

@@ -24,6 +24,7 @@ export default function AdminDashboard({ user }) {
   const [driveProgress, setDriveProgress] = useState(null); // null | { total, done, errors }
   const [driveSending, setDriveSending] = useState(false);
   const [form, setForm] = useState({
+    clientSociete:"",
     clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
     adresseFacturation:"", adresseIntervention:"",
     demandeClient:"", numDevis:"", signataire:"",
@@ -94,6 +95,7 @@ export default function AdminDashboard({ user }) {
     setSaving(true);
     try {
       await addDoc(collection(db, "bons"), {
+        clientSociete:       form.clientSociete || "",
         clientNom:           form.clientNom,
         clientPrenom:        form.clientPrenom,
         clientTel:           form.clientTel,
@@ -125,6 +127,7 @@ export default function AdminDashboard({ user }) {
       });
       await fetchBons();
       setForm({
+        clientSociete:"",
         clientNom:"", clientPrenom:"", clientTel:"", clientEmail:"",
         adresseFacturation:"", adresseIntervention:"",
         demandeClient:"", numDevis:"", signataire:"",
@@ -153,6 +156,7 @@ export default function AdminDashboard({ user }) {
   const saveEdit = async () => {
     setSaving(true);
     await updateDoc(doc(db, "bons", selected.id), {
+      clientSociete: editForm.clientSociete || "",
       clientNom: editForm.clientNom,
       clientPrenom: editForm.clientPrenom,
       clientTel: editForm.clientTel,
@@ -217,6 +221,7 @@ export default function AdminDashboard({ user }) {
     if (bon.numVisite) row("N° Visite", bon.numVisite);
     row("Collaborateur", bon.techNom); y += 2;
     section("CLIENT");
+    if (bon.clientSociete) row("Société", bon.clientSociete);
     row("Nom", bon.clientNom + " " + bon.clientPrenom);
     row("Téléphone", bon.clientTel); row("Email", bon.clientEmail);
     if (bon.adresseFacturation) row("Adresse facturation", bon.adresseFacturation);
@@ -244,7 +249,10 @@ export default function AdminDashboard({ user }) {
     else { doc2.setDrawColor(200,200,200); doc2.rect(ml+90,y,80,30); }
     doc2.setFontSize(8); doc2.setTextColor(150,150,150);
     doc2.text("Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028", W/2, 285, {align:"center"});
-    const nomFichier = (bon.ref + "_" + (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase() + "_" + (bon.datePrevue||"") + ".pdf")
+    const clientLabel = bon.clientSociete
+      ? bon.clientSociete.toUpperCase()
+      : (bon.clientNom||"").toUpperCase() + "_" + (bon.clientPrenom||"").toUpperCase();
+    const nomFichier = (bon.ref + "_" + clientLabel + "_" + (bon.datePrevue||"") + ".pdf")
       .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-\.]/g, "");
     if (autoSave) doc2.save(nomFichier);
     return doc2.output("datauristring");
@@ -334,6 +342,7 @@ export default function AdminDashboard({ user }) {
 
         <div className="card">
           <div className="card-title">Informations client</div>
+          <div className="field"><label>Société <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel</span></label><input value={form.clientSociete} onChange={e=>setForm({...form,clientSociete:e.target.value})} placeholder="Nom de l'entreprise" /></div>
           <div className="row2">
             <div className="field"><label>Nom</label><input required value={form.clientNom} onChange={e=>setForm({...form,clientNom:e.target.value})} /></div>
             <div className="field"><label>Prénom</label><input required value={form.clientPrenom} onChange={e=>setForm({...form,clientPrenom:e.target.value})} /></div>
@@ -401,6 +410,7 @@ export default function AdminDashboard({ user }) {
       </div>
       <div className="card">
         <div className="card-title">Client</div>
+        <div className="field"><label>Société <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel</span></label><input value={editForm.clientSociete||""} onChange={e=>setEditForm({...editForm,clientSociete:e.target.value})} placeholder="Nom de l'entreprise" /></div>
         <div className="row2">
           <div className="field"><label>Nom</label><input value={editForm.clientNom} onChange={e=>setEditForm({...editForm,clientNom:e.target.value})} /></div>
           <div className="field"><label>Prénom</label><input value={editForm.clientPrenom} onChange={e=>setEditForm({...editForm,clientPrenom:e.target.value})} /></div>
@@ -474,6 +484,7 @@ export default function AdminDashboard({ user }) {
 
       <div className="card">
         <div className="card-title">Client</div>
+        {selected.clientSociete && <div className="info-row"><span>Société</span><b>{selected.clientSociete}</b></div>}
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
