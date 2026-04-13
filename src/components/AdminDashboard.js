@@ -278,7 +278,7 @@ export default function AdminDashboard({ user }) {
         <span className="bon-ref">{b.ref}{b.numDevis ? " · " + b.numDevis : ""}</span>
         <span className="badge" style={{background:sc(b.statut),color:st(b.statut)}}>{b.statut}</span>
       </div>
-      <div className="bon-card-body"><b>{b.clientNom} {b.clientPrenom}</b><span>{b.type}</span></div>
+      <div className="bon-card-body"><b>{b.clientSociete ? <span style={{display:"block",fontSize:11,color:"#2a9d8f",fontWeight:600}}>{b.clientSociete}</span> : null}{b.clientNom} {b.clientPrenom}</b><span>{b.type}</span></div>
       <div className="bon-card-footer"><span>{b.datePrevue} à {b.heurePrevue}</span><span>{b.techNom}</span></div>
     </div>
   );
@@ -655,6 +655,72 @@ export default function AdminDashboard({ user }) {
             </div>
         }
       </div>
+
+      {/* BONS DE LA SEMAINE */}
+      <div className="card" style={{marginTop:"1rem"}}>
+        <div className="card-title">Bons de la semaine</div>
+        {(() => {
+          const todayStr = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
+          const now = new Date();
+          const day = now.getDay();
+          const diffToMonday = (day === 0 ? -6 : 1 - day);
+          const monday = new Date(now);
+          monday.setDate(now.getDate() + diffToMonday);
+          monday.setHours(0,0,0,0);
+          const saturday = new Date(monday);
+          saturday.setDate(monday.getDate() + 5);
+          saturday.setHours(23,59,59,999);
+
+          const bonsWeek = bons.filter(b => {
+            if (b.datePrevue === todayStr) return false;
+            const d = new Date(b.datePrevue + "T00:00:00");
+            return d >= monday && d <= saturday;
+          }).sort((a,b) => {
+            const cmp = a.datePrevue.localeCompare(b.datePrevue);
+            return cmp !== 0 ? cmp : (a.heurePrevue||"").localeCompare(b.heurePrevue||"");
+          });
+
+          if (bonsWeek.length === 0) return (
+            <div className="empty-state" style={{padding:"1rem 0"}}>Aucun autre bon prévu cette semaine.</div>
+          );
+
+          return (
+            <div className="table-wrapper">
+              <table className="bons-table">
+                <thead>
+                  <tr>
+                    <th>Réf.</th>
+                    <th>Date</th>
+                    <th>Client</th>
+                    <th>Type</th>
+                    <th>Heure</th>
+                    <th>Collaborateur</th>
+                    <th>Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bonsWeek.map(b => (
+                    <tr key={b.id} onClick={() => { setSelected(b); setView("detail"); }} style={{cursor:"pointer"}}>
+                      <td><span className="bon-ref">{b.ref}</span></td>
+                      <td style={{fontSize:12,whiteSpace:"nowrap"}}>{new Date(b.datePrevue + "T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})}</td>
+                      <td>
+                        {b.clientSociete && <span style={{display:"block",fontSize:11,color:"#2a9d8f",fontWeight:600}}>{b.clientSociete}</span>}
+                        <b style={{display:"block"}}>{b.clientNom} {b.clientPrenom}</b>
+                        <span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span>
+                      </td>
+                      <td style={{fontSize:12}}>{b.type}</td>
+                      <td style={{fontSize:13,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
+                      <td style={{fontSize:13}}>{b.techNom}</td>
+                      <td><span className="badge" style={{background:sc(b.statut),color:st(b.statut),whiteSpace:"nowrap"}}>{b.statut}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+      </div>
+
     </div>
   );
 }
