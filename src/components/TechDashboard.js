@@ -526,7 +526,7 @@ export default function TechDashboard({ user }) {
               <span className="badge" style={{background:statutColor(b.statut),color:statutText(b.statut)}}>{b.statut}</span>
             </div>
             <div className="bon-card-body">
-              <b>{b.clientNom} {b.clientPrenom}</b>
+              <b>{b.clientSociete ? <span>{b.clientSociete} — {b.clientNom} {b.clientPrenom}</span> : <span>{b.clientNom} {b.clientPrenom}</span>}</b>
               <span>{b.type}</span>
             </div>
             <div className="bon-card-footer">
