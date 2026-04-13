@@ -633,11 +633,11 @@ export default function AdminDashboard({ user }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {bons.filter(b => b.datePrevue === today).map(b => (
+                  {bons.filter(b => b.datePrevue === today).sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||"")).map(b => (
                     <tr key={b.id} onClick={() => { setSelected(b); setView("detail"); }} style={{cursor:"pointer"}}>
                       <td><span className="bon-ref">{b.ref}</span></td>
                       <td style={{fontSize:12,color:"#888"}}>{b.numDevis || "—"}</td>
-                      <td><b style={{display:"block"}}>{b.clientNom} {b.clientPrenom}</b><span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span></td>
+                      <td><b style={{display:"block"}}>{b.clientSociete && <span style={{color:"#2a9d8f",display:"block",fontSize:11}}>{b.clientSociete}</span>}{b.clientNom} {b.clientPrenom}</b><span style={{fontSize:11,color:"#888"}}>{b.clientTel}</span></td>
                       <td style={{fontSize:12}}>{b.type}</td>
                       <td style={{fontSize:13,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
                       <td style={{fontSize:13}}>{b.techNom}</td>
