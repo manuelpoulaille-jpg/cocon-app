@@ -193,6 +193,15 @@ export default function AdminDashboard({ user }) {
     return h > 0 ? h + "h" + m.toString().padStart(2,"0") : m + " min";
   };
 
+  const demanderAvis = (bon) => {
+    const prenom = bon.clientPrenom || bon.clientNom || "client";
+    const tel = (bon.clientTel || "").replace(/\s/g, "").replace(/^0/, "596");
+    const message = encodeURIComponent(
+      `🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout est à votre goût !\n\nSi vous souhaitez partager votre expérience, un avis Google nous aiderait beaucoup — cela ne prend qu'une minute 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`
+    );
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${message}`, "_blank");
+  };
+
   const downloadPDF = async (bon, autoSave = true) => {
     const { jsPDF } = await import("jspdf");
     const doc2 = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -549,7 +558,16 @@ export default function AdminDashboard({ user }) {
       )}
 
       {selected.statut === "terminé" && (
-        <button className="btn-primary" onClick={() => downloadPDF(selected)}>Télécharger le PDF</button>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <button className="btn-primary" style={{flex:1}} onClick={() => downloadPDF(selected)}>Télécharger le PDF</button>
+          {selected.clientTel && (
+            <button
+              onClick={() => demanderAvis(selected)}
+              style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>
+              💬 Demander un avis Google
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
