@@ -195,7 +195,17 @@ export default function AdminDashboard({ user }) {
 
   const demanderAvis = (bon) => {
     const prenom = bon.clientPrenom || bon.clientNom || "client";
-    const tel = (bon.clientTel || "").replace(/\s/g, "").replace(/^0/, "596");
+    const raw = (bon.clientTel || "").replace(/\s/g, "");
+    let tel = raw;
+    if (raw.startsWith("+")) {
+      tel = raw.slice(1);
+    } else if (raw.startsWith("0696")) {
+      tel = "596" + raw.slice(1);
+    } else if (raw.startsWith("06") || raw.startsWith("07")) {
+      tel = "33" + raw.slice(1);
+    } else {
+      tel = "596" + raw.slice(1);
+    }
     const message = encodeURIComponent(
       `🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout est à votre goût !\n\nSi vous souhaitez partager votre expérience, un avis Google nous aiderait beaucoup — cela ne prend qu'une minute 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`
     );
