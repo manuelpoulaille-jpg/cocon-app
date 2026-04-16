@@ -207,7 +207,7 @@ export default function AdminDashboard({ user }) {
       tel = "596" + raw.slice(1);
     }
     const message = encodeURIComponent(
-      `🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout est à votre goût !\n\nSi vous souhaitez partager votre expérience, un avis Google nous aiderait beaucoup — cela ne prend qu'une minute 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`
+      `🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nSi vous souhaitez partager votre expérience, un avis Google nous aiderait beaucoup — cela ne prend qu'une minute 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`
     );
     window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${message}`, "_blank");
   };
