@@ -41,14 +41,19 @@ function todayStr() {
 
 function addOneYear(dateStr) {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toLocaleDateString("fr-CA");
+  // Parser en local (pas UTC) pour eviter le decalage Martinique UTC-4
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const next = new Date(y + 1, m - 1, d);
+  const yy = next.getFullYear();
+  const mm = String(next.getMonth() + 1).padStart(2, "0");
+  const dd = String(next.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 function getDaysTo(dateStr) {
   if (!dateStr) return null;
-  const diff = new Date(dateStr) - new Date();
+  // Forcer parsing local avec T00:00:00 pour eviter decalage UTC Martinique
+  const diff = new Date(dateStr + "T00:00:00") - new Date();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
@@ -69,12 +74,12 @@ function nextPassageDate(c) {
   }
   const next = new Date(baseDate);
   next.setDate(next.getDate() + intervalDays);
-  // Si la date calculée est déjà passée, avancer d'un intervalle
-  const today = new Date();
-  while (next < today) {
-    next.setDate(next.getDate() + intervalDays);
-  }
-  return next.toLocaleDateString("fr-CA");
+  // On retourne la VRAIE prochaine echeance meme si elle est depassee
+  // pour alerter le retard — pas de saut automatique
+  const yy = next.getFullYear();
+  const mm = String(next.getMonth() + 1).padStart(2, "0");
+  const dd = String(next.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 function fmtDate(str) {
@@ -499,25 +504,40 @@ export default function ContratModule() {
 
         {/* Prochaine intervention */}
         {nextDate && sc !== "résilié" && sc !== "expiré" && (
-          <div className="card" style={{borderLeft: daysToNext !== null && daysToNext <= RELANCE_ALERT_DAYS && daysToNext >= 0 ? "3px solid #8B6A4E" : "none"}}>
+          <div className="card" style={{
+            borderLeft: daysToNext !== null && daysToNext < 0
+              ? "3px solid #c0392b"
+              : daysToNext !== null && daysToNext <= RELANCE_ALERT_DAYS
+              ? "3px solid #8B6A4E"
+              : "none"
+          }}>
             <div className="card-title">Prochaine intervention estimée</div>
             <div className="info-row">
               <span>Date estimée</span>
-              <b style={{color: daysToNext!==null&&daysToNext<=RELANCE_ALERT_DAYS&&daysToNext>=0?"#8B6A4E":"#35B499", fontSize:15}}>
+              <b style={{color: daysToNext!==null&&daysToNext<0?"#c0392b":daysToNext!==null&&daysToNext<=RELANCE_ALERT_DAYS?"#8B6A4E":"#35B499", fontSize:15}}>
                 {fmtDate(nextDate)}
               </b>
             </div>
             {daysToNext !== null && (
               <div className="info-row">
-                <span>Dans</span>
-                <b style={{color:daysToNext<=RELANCE_ALERT_DAYS&&daysToNext>=0?"#8B6A4E":"var(--color-text-primary)"}}>
-                  {daysToNext<=0?"Aujourd'hui ou dépassé":`${daysToNext} jour(s)`}
+                <span>Statut</span>
+                <b style={{color:daysToNext<0?"#c0392b":daysToNext<=RELANCE_ALERT_DAYS?"#8B6A4E":"#35B499"}}>
+                  {daysToNext < 0
+                    ? `⚠️ En retard de ${Math.abs(daysToNext)} jour(s)`
+                    : daysToNext === 0
+                    ? "Aujourd'hui"
+                    : `Dans ${daysToNext} jour(s)`}
                 </b>
               </div>
             )}
-            {daysToNext !== null && daysToNext <= RELANCE_ALERT_DAYS && daysToNext >= 0 && (
+            {daysToNext !== null && daysToNext < 0 && (
+              <p style={{fontSize:12,color:"#c0392b",marginTop:6,fontWeight:500}}>
+                🔴 Passage en retard — à planifier et relancer le client
+              </p>
+            )}
+            {daysToNext !== null && daysToNext >= 0 && daysToNext <= RELANCE_ALERT_DAYS && (
               <p style={{fontSize:12,color:"#8B6A4E",marginTop:6,fontWeight:500}}>
-                ⚠️ Intervention à planifier — pensez à contacter le client
+                ⚠️ Intervention imminente — pensez à contacter le client
               </p>
             )}
             <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:6,fontStyle:"italic"}}>
@@ -627,7 +647,8 @@ export default function ContratModule() {
   const aRelancer = contrats.filter(c => {
     if (c.sc==="résilié"||c.sc==="expiré") return false;
     const d = getDaysTo(nextPassageDate(c));
-    return d!==null && d>=0 && d<=RELANCE_ALERT_DAYS;
+    // En retard (d < 0) OU dans les RELANCE_ALERT_DAYS prochains jours
+    return d!==null && d<=RELANCE_ALERT_DAYS;
   }).length;
 
   // CA annuel total des contrats actifs
@@ -765,7 +786,7 @@ export default function ContratModule() {
                   const next        = nextPassageDate(c);
                   const daysNext    = getDaysTo(next);
                   const daysContrat = getDaysTo(c.dateFin);
-                  const alert       = daysNext!==null&&daysNext>=0&&daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré";
+                  const alert       = daysNext!==null&&(daysNext<0||(daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré"));
                   const annuel      = c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
                   const pct         = c.nbPassages?Math.min(100,Math.round(((c.passages||[]).length/c.nbPassages)*100)):0;
                   const lastRelance = (c.relances||[]).length>0?[...(c.relances||[])].sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
@@ -791,9 +812,10 @@ export default function ContratModule() {
                       </td>
                       <td style={{whiteSpace:"nowrap"}}>
                         {next?(
-                          <span style={{color:alert?"#8B6A4E":"var(--color-text-primary)",fontWeight:alert?600:400}}>
+                          <span style={{color:daysNext!==null&&daysNext<0?"#c0392b":alert?"#8B6A4E":"var(--color-text-primary)",fontWeight:daysNext!==null&&(daysNext<0||alert)?600:400}}>
                             {fmtDate(next)}
-                            {alert&&<span style={{display:"block",fontSize:10,color:"#8B6A4E"}}>⚠ dans {daysNext}j</span>}
+                            {daysNext!==null&&daysNext<0&&<span style={{display:"block",fontSize:10,color:"#c0392b"}}>🔴 retard {Math.abs(daysNext)}j</span>}
+                            {daysNext!==null&&daysNext>=0&&alert&&<span style={{display:"block",fontSize:10,color:"#8B6A4E"}}>⚠ dans {daysNext}j</span>}
                           </span>
                         ):"—"}
                       </td>
