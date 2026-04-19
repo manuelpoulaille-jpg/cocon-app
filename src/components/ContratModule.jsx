@@ -604,6 +604,18 @@ export default function ContratModule() {
     brouillon:  contrats.filter(c=>c.sc==="brouillon").length,
   };
 
+  // Contrats avec prochaine intervention dans <= 15j
+  const aRelancer = contrats.filter(c => {
+    if (c.sc==="résilié"||c.sc==="expiré") return false;
+    const d = getDaysTo(nextPassageDate(c));
+    return d!==null && d>=0 && d<=RELANCE_ALERT_DAYS;
+  }).length;
+
+  // CA annuel total des contrats actifs
+  const caAnnuel = contrats
+    .filter(c=>c.sc==="actif"||c.sc==="à renouveler")
+    .reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+
   const FILTERS = [
     ["tous","Tous"],["actif","Actifs"],["renouveler","À renouveler"],
     ["expire","Expirés"],["resilie","Résiliés"],["brouillon","Brouillons"],
@@ -617,20 +629,90 @@ export default function ContratModule() {
     return c.sc===filter;
   });
 
-  return (
-    <div className="container">
-      <div className="page-header"><h2>Contrats de maintenance</h2></div>
+  // CSS tableau injecté (cohérence avec AdminDashboard)
+  const TABLE_CSS = `
+    .ctr-table-wrap{overflow-x:auto}
+    .ctr-table{width:100%;border-collapse:collapse;font-size:12px}
+    .ctr-table th{text-align:left;font-size:9.5px;font-weight:500;color:#888;text-transform:uppercase;letter-spacing:.8px;padding:8px 14px;border-bottom:.5px solid #e8e5e0;white-space:nowrap;background:white}
+    .ctr-table td{padding:10px 14px;border-bottom:.5px solid #f0ede8;color:var(--color-text-primary);vertical-align:middle}
+    .ctr-table tr:last-child td{border-bottom:none}
+    .ctr-table tr:hover td{background:#fafaf8;cursor:pointer}
+    .ctr-ref{font-size:11px;color:#35B499;font-weight:600}
+    .ctr-badge{font-size:10px;font-weight:500;padding:3px 9px;border-radius:20px;white-space:nowrap;display:inline-block}
+    .ctr-badge.actif{background:#e1f5ee;color:#0e6b50}
+    .ctr-badge.renouveler{background:#f5e8d8;color:#6b4a31}
+    .ctr-badge.expire,.ctr-badge.resilie{background:#fde8e8;color:#9b2c2c}
+    .ctr-badge.brouillon{background:#f0f0f0;color:#888}
+    .ctr-prog{height:4px;background:#f0ede8;border-radius:2px;overflow:hidden;width:70px}
+    .ctr-prog-fill{height:100%;border-radius:2px;background:#35B499}
+    .ctr-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+    .ctr-kpi{background:white;border-radius:10px;padding:14px 16px;border:.5px solid #e0ddd8;position:relative;overflow:hidden;cursor:pointer}
+    .ctr-kpi:hover{box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    .ctr-kpi-accent{position:absolute;top:0;left:0;right:0;height:3px}
+    .ctr-kpi-label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:500}
+    .ctr-kpi-val{font-size:26px;font-weight:700;color:#1a1a1a;letter-spacing:-1px;margin:0;line-height:1}
+    .ctr-kpi-sub{font-size:10px;color:#888;margin:4px 0 0}
+    .ctr-panel{background:white;border-radius:10px;border:.5px solid #e0ddd8;overflow:hidden}
+    .ctr-panel-head{padding:12px 16px;border-bottom:.5px solid #e8e5e0;display:flex;align-items:center;gap:8px}
+    .ctr-panel-title{font-size:12px;font-weight:600;color:#1a1a1a;margin:0}
+    .ctr-panel-count{font-size:11px;color:#888;margin-left:auto}
+  `;
 
-      {/* Filtres */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
+  if (!document.getElementById("ctr-styles")) {
+    const el = document.createElement("style");
+    el.id = "ctr-styles"; el.textContent = TABLE_CSS;
+    document.head.appendChild(el);
+  }
+
+  const badgeClass = (sc) => ({
+    "actif":"actif","à renouveler":"renouveler","expiré":"expire","résilié":"resilie","brouillon":"brouillon"
+  }[sc]||"brouillon");
+
+  return (
+    <div style={{padding:"22px 24px"}}>
+
+      {/* KPI */}
+      <div className="ctr-kpi-row">
+        <div className="ctr-kpi" onClick={()=>setFilter("actif")}>
+          <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
+          <p className="ctr-kpi-label">Contrats actifs</p>
+          <p className="ctr-kpi-val">{counts.actif}</p>
+          <p className="ctr-kpi-sub" style={{color:"#1a7a65"}}>sur {counts.tous} au total</p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>setFilter("renouveler")}>
+          <div className="ctr-kpi-accent" style={{background:"#8B6A4E"}}/>
+          <p className="ctr-kpi-label">À renouveler</p>
+          <p className="ctr-kpi-val">{counts.renouveler}</p>
+          <p className="ctr-kpi-sub" style={{color:counts.renouveler>0?"#8B6A4E":"#888"}}>
+            {counts.renouveler>0?"Action requise":"Aucun"}
+          </p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>{}}>
+          <div className="ctr-kpi-accent" style={{background:aRelancer>0?"#8B6A4E":"#35B499"}}/>
+          <p className="ctr-kpi-label">Relances à faire</p>
+          <p className="ctr-kpi-val">{aRelancer}</p>
+          <p className="ctr-kpi-sub" style={{color:aRelancer>0?"#8B6A4E":"#888"}}>
+            {aRelancer>0?"Passage à planifier":"À jour"}
+          </p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>{}}>
+          <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
+          <p className="ctr-kpi-label">CA annuel contrats</p>
+          <p className="ctr-kpi-val" style={{fontSize:18}}>{caAnnuel.toFixed(0)} €</p>
+          <p className="ctr-kpi-sub">TTC — contrats actifs</p>
+        </div>
+      </div>
+
+      {/* Filtres + bouton */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
         {FILTERS.map(([key,label])=>{
           const active=filter===key, cnt=counts[key];
           if(cnt===0&&key!=="tous"&&key!==filter) return null;
           return(
             <div key={key} onClick={()=>setFilter(key)}
-              style={{padding:"5px 14px",borderRadius:20,fontSize:12,cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",
-                background:active?(key==="renouveler"?"#f5e8d8":key==="expire"||key==="resilie"?"#fde8e8":"#e1f5ee"):"var(--color-background-secondary)",
-                color:active?(key==="renouveler"?"#6b4a31":key==="expire"||key==="resilie"?"#9b2c2c":"#0e6b50"):"var(--color-text-secondary)"}}>
+              style={{padding:"5px 14px",borderRadius:20,fontSize:12,cursor:"pointer",border:".5px solid #e0ddd8",
+                background:active?(key==="renouveler"?"#f5e8d8":key==="expire"||key==="resilie"?"#fde8e8":"#e1f5ee"):"#f5f5f2",
+                color:active?(key==="renouveler"?"#6b4a31":key==="expire"||key==="resilie"?"#9b2c2c":"#0e6b50"):"#888"}}>
               {label} ({cnt})
             </div>
           );
@@ -641,55 +723,91 @@ export default function ContratModule() {
         </button>
       </div>
 
-      {/* Liste */}
-      {filtered.length===0 ? (
-        <div className="empty-state">Aucun contrat dans cette catégorie.</div>
-      ) : (
-        filtered.map(c=>{
-          const sStyle=statutStyle(c.sc);
-          const days=getDaysTo(c.dateFin);
-          const pct=c.nbPassages?Math.min(100,Math.round(((c.passages||[]).length/c.nbPassages)*100)):0;
-          const annuel=c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
-          const next=nextPassageDate(c);
-          const daysNext=getDaysTo(next);
-          const hasRelanceAlert=daysNext!==null&&daysNext<=RELANCE_ALERT_DAYS&&daysNext>=0&&c.sc!=="résilié"&&c.sc!=="expiré";
-          const lastRelance=(c.relances||[]).length>0?[...(c.relances||[])].sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-
-          return(
-            <div key={c.id} className="bon-card" onClick={()=>{setSelected(c);setView("detail");}}>
-              <div className="bon-card-top">
-                <span className="bon-ref">{c.ref}</span>
-                <span className="badge" style={{background:sStyle.bg,color:sStyle.color}}>{c.sc}</span>
-                {hasRelanceAlert && <span style={{fontSize:10,background:"#f5e8d8",color:"#6b4a31",padding:"2px 8px",borderRadius:20,fontWeight:500}}>⚠️ À relancer</span>}
-              </div>
-              <div className="bon-card-body">
-                <b>{c.clientNom}</b>
-                <span>{(c.prestations||[]).join(", ")||"—"}</span>
-              </div>
-              {c.nbPassages && (
-                <>
-                  <div style={{height:3,background:"var(--color-border-tertiary)",borderRadius:2,margin:"8px 0 3px"}}>
-                    <div style={{height:3,background:"#35B499",borderRadius:2,width:pct+"%"}}/>
-                  </div>
-                  <div className="bon-card-footer">
-                    <span>{(c.passages||[]).length}/{c.nbPassages} passages{annuel?` · ${annuel} €/an`:""}</span>
-                    {next && (
-                      <span style={{color:hasRelanceAlert?"#8B6A4E":"var(--color-text-secondary)",fontWeight:hasRelanceAlert?500:400}}>
-                        Prochain : {fmtDate(next)}{hasRelanceAlert?` (${daysNext}j)`:""}
-                      </span>
-                    )}
-                  </div>
-                  {lastRelance && (
-                    <div style={{fontSize:10,color:"var(--color-text-secondary)",marginTop:4,paddingTop:4,borderTop:"0.5px solid var(--color-border-tertiary)"}}>
-                      Dernière relance : {fmtDate(lastRelance.date)}{lastRelance.note?` — ${lastRelance.note}`:""}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })
-      )}
+      {/* Tableau */}
+      <div className="ctr-panel">
+        <div className="ctr-panel-head">
+          <span className="ctr-panel-title">Contrats d'intervention</span>
+          <span className="ctr-panel-count">{filtered.length} contrat{filtered.length!==1?"s":""}</span>
+        </div>
+        {filtered.length===0 ? (
+          <div style={{padding:"24px",textAlign:"center",fontSize:13,color:"#aaa"}}>Aucun contrat dans cette catégorie.</div>
+        ) : (
+          <div className="ctr-table-wrap">
+            <table className="ctr-table">
+              <thead>
+                <tr>
+                  <th>Référence</th>
+                  <th>Client</th>
+                  <th>Prestations</th>
+                  <th>Passages</th>
+                  <th>Montant TTC/an</th>
+                  <th>Prochaine intervention</th>
+                  <th>Dernière relance</th>
+                  <th>Échéance</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c=>{
+                  const next        = nextPassageDate(c);
+                  const daysNext    = getDaysTo(next);
+                  const daysContrat = getDaysTo(c.dateFin);
+                  const alert       = daysNext!==null&&daysNext>=0&&daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré";
+                  const annuel      = c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
+                  const pct         = c.nbPassages?Math.min(100,Math.round(((c.passages||[]).length/c.nbPassages)*100)):0;
+                  const lastRelance = (c.relances||[]).length>0?[...(c.relances||[])].sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+                  const sStyle      = statutStyle(c.sc);
+                  return(
+                    <tr key={c.id} onClick={()=>{setSelected(c);setView("detail");}}>
+                      <td><span className="ctr-ref">{c.ref}</span></td>
+                      <td>
+                        <span style={{fontWeight:500,display:"block"}}>{c.clientNom}</span>
+                        {c.clientResponsable&&<span style={{fontSize:10,color:"#888"}}>{c.clientResponsable}</span>}
+                      </td>
+                      <td style={{fontSize:11,color:"#555",maxWidth:140}}>
+                        {(c.prestations||[]).join(", ")||"—"}
+                      </td>
+                      <td>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div className="ctr-prog"><div className="ctr-prog-fill" style={{width:pct+"%"}}/></div>
+                          <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{(c.passages||[]).length}/{c.nbPassages}</span>
+                        </div>
+                      </td>
+                      <td style={{fontWeight:500,color:"#35B499",whiteSpace:"nowrap"}}>
+                        {annuel?annuel+" €":"—"}
+                      </td>
+                      <td style={{whiteSpace:"nowrap"}}>
+                        {next?(
+                          <span style={{color:alert?"#8B6A4E":"var(--color-text-primary)",fontWeight:alert?600:400}}>
+                            {fmtDate(next)}
+                            {alert&&<span style={{display:"block",fontSize:10,color:"#8B6A4E"}}>⚠ dans {daysNext}j</span>}
+                          </span>
+                        ):"—"}
+                      </td>
+                      <td style={{fontSize:11,color:"#888",maxWidth:160}}>
+                        {lastRelance?(
+                          <span>
+                            {fmtDate(lastRelance.date)}
+                            {lastRelance.note&&<span style={{display:"block",fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{lastRelance.note}</span>}
+                          </span>
+                        ):<span style={{color:"#ccc"}}>—</span>}
+                      </td>
+                      <td style={{fontSize:11,whiteSpace:"nowrap",color:daysContrat!==null&&daysContrat<=ALERT_DAYS&&daysContrat>=0?"#8B6A4E":daysContrat!==null&&daysContrat<0?"#c0392b":"#888"}}>
+                        {fmtDate(c.dateFin)}
+                        {daysContrat!==null&&daysContrat>=0&&daysContrat<=ALERT_DAYS&&<span style={{display:"block",fontSize:10}}>dans {daysContrat}j</span>}
+                        {daysContrat!==null&&daysContrat<0&&<span style={{display:"block",fontSize:10}}>expiré</span>}
+                      </td>
+                      <td>
+                        <span className={`ctr-badge ${badgeClass(c.sc)}`}>{c.sc}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
