@@ -6,6 +6,7 @@ import {
 } from "firebase/firestore";
 import logoBase64 from "../logoBase64";
 import ContratModule from "./ContratModule";
+import CarburantModule from "./CarburantModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -82,7 +83,7 @@ const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
 
-export default function AdminDashboard({ user }) {
+export default function AdminDashboard({ user, onLogout }) {
   const [bons,setBons]=useState([]);
   const [view,setView]=useState("dashboard");
   const [selected,setSelected]=useState(null);
@@ -249,6 +250,7 @@ export default function AdminDashboard({ user }) {
 
   const renderContent=()=>{
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
+    if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -407,6 +409,7 @@ export default function AdminDashboard({ user }) {
           <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>setView("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
+        {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
       </div>
       <div className="ca-main">
         <div className="ca-topbar">
