@@ -113,92 +113,284 @@ async function generatePDF(c) {
   const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, ml = 15, mr = 195, cw = 180;
-  const teal = [53, 180, 153], dark = [30, 30, 30], gray = [110, 110, 110], lightBg = [243, 243, 243];
+  const teal = [53, 180, 153];
+  const dark = [30, 30, 30];
+  const gray = [100, 100, 100];
 
-  pdf.setFillColor(...teal); pdf.rect(0, 0, W, 30, "F");
-  try { pdf.addImage(logoBase64, "PNG", ml, 4, 28, 22); } catch(e) {}
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(15); pdf.setFont("helvetica", "bold");
-  pdf.text("CONTRAT DE PRESTATION DE SERVICES", 50, 13);
-  pdf.setFontSize(8.5); pdf.setFont("helvetica", "normal");
-  pdf.text("Lutte antiparasitaire & Protection du bâtiment", 50, 20);
-  pdf.text(`Réf. ${c.ref}  |  Signé le ${fmtDate(c.dateSignature)}`, 50, 26);
+  const setDark = () => { pdf.setTextColor(...dark); pdf.setFont("helvetica","normal"); pdf.setFontSize(10); };
+  const setBold = () => { pdf.setTextColor(...dark); pdf.setFont("helvetica","bold"); pdf.setFontSize(10); };
+  const setGray = () => { pdf.setTextColor(...gray); pdf.setFont("helvetica","normal"); pdf.setFontSize(9); };
 
-  let y = 38;
-  const hw = (cw - 8) / 2;
-  const drawParty = (x, title, lines) => {
-    pdf.setFillColor(...lightBg); pdf.rect(x, y, hw, 40, "F");
-    pdf.setTextColor(...teal); pdf.setFontSize(8); pdf.setFont("helvetica", "bold");
-    pdf.text(title, x + 4, y + 6);
-    pdf.setTextColor(...dark); pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
-    lines.filter(Boolean).forEach((l, i) => pdf.text(l, x + 4, y + 13 + i * 5));
+  // ── EN-TÊTE ────────────────────────────────────────────────────────────────
+  try { pdf.addImage(logoBase64, "PNG", ml, 6, 26, 20); } catch(e) {}
+
+  pdf.setFontSize(14); setBold();
+  pdf.setTextColor(...teal);
+  pdf.text("Contrat dératisation / désinsectisation", W / 2, 14, { align: "center" });
+  pdf.setFontSize(9); pdf.setFont("helvetica","italic"); pdf.setTextColor(...gray);
+  pdf.text("La maison protégée – Solutions antiparasitaires", W / 2, 20, { align: "center" });
+
+  pdf.setDrawColor(...teal); pdf.setLineWidth(0.5);
+  pdf.line(ml, 24, mr, 24);
+
+  // ── TABLEAU PARTIES ────────────────────────────────────────────────────────
+  let y = 28;
+  const hw = (cw / 2) - 2;
+  const colR = ml + hw + 4;
+
+  // Fond entêtes
+  pdf.setFillColor(...teal);
+  pdf.rect(ml, y, hw, 7, "F");
+  pdf.rect(colR, y, hw, 7, "F");
+  pdf.setTextColor(255,255,255); pdf.setFontSize(9); pdf.setFont("helvetica","bold");
+  pdf.text("Le Prestataire", ml + hw/2, y + 5, { align:"center" });
+  pdf.text("Le Client", colR + hw/2, y + 5, { align:"center" });
+  y += 7;
+
+  const prestRows = [
+    ["Raison sociale :", "Cocon Plus SARL"],
+    ["Adresse :", "Berges de Kerlys, 97200 Fort-de-France"],
+    ["SIRET :", "47756829900028"],
+    ["Représenté par :", COCON_INFO.representant],
+    ["Téléphone :", "0596 73 66 66 / 06 96 69 48 00"],
+    ["Email :", COCON_INFO.email],
+  ];
+  const clientRows = [
+    ["Nom et Prénom :", c.clientNom + (c.clientResponsable ? " — " + c.clientResponsable : "")],
+    ["Adresse :", c.clientAdresse || "—"],
+    ["SIRET :", ""],
+    ["Représenté par :", c.clientResponsable || ""],
+    ["Téléphone :", c.clientTel || "—"],
+    ["Email :", c.clientEmail || "—"],
+  ];
+  const rowH = 8;
+  prestRows.forEach((r, i) => {
+    const ry = y + i * rowH;
+    pdf.setFillColor(i % 2 === 0 ? 248 : 255, i % 2 === 0 ? 248 : 255, i % 2 === 0 ? 248 : 255);
+    pdf.rect(ml, ry, hw, rowH, "F");
+    pdf.rect(colR, ry, hw, rowH, "F");
+    pdf.setDrawColor(220,220,220); pdf.setLineWidth(0.3);
+    pdf.line(ml, ry + rowH, ml + hw, ry + rowH);
+    pdf.line(colR, ry + rowH, colR + hw, ry + rowH);
+    pdf.setFontSize(8);
+    pdf.setFont("helvetica","bold"); pdf.setTextColor(...dark);
+    pdf.text(r[0], ml + 2, ry + 5.5);
+    pdf.setFont("helvetica","normal");
+    pdf.text(pdf.splitTextToSize(r[1], hw - 28)[0] || "", ml + 30, ry + 5.5);
+    pdf.setFont("helvetica","bold");
+    pdf.text(clientRows[i][0], colR + 2, ry + 5.5);
+    pdf.setFont("helvetica","normal");
+    pdf.text(pdf.splitTextToSize(clientRows[i][1], hw - 30)[0] || "", colR + 30, ry + 5.5);
+  });
+  y += prestRows.length * rowH;
+
+  // Ligne "Ci-après désigné"
+  pdf.setFillColor(...teal);
+  pdf.rect(ml, y, hw, 6, "F"); pdf.rect(colR, y, hw, 6, "F");
+  pdf.setTextColor(255,255,255); pdf.setFontSize(7.5); pdf.setFont("helvetica","italic");
+  pdf.text('Ci-après désigné "Le Prestataire"', ml + hw/2, y + 4, { align:"center" });
+  pdf.text('Ci-après désigné "Le Client"', colR + hw/2, y + 4, { align:"center" });
+  y += 6;
+
+  pdf.setDrawColor(200,200,200); pdf.setLineWidth(0.3);
+  pdf.rect(ml, 28, cw, y - 28);
+  pdf.line(ml + hw + 2, 28, ml + hw + 2, y);
+
+  y += 5;
+  pdf.setFontSize(10); setBold(); pdf.setTextColor(...dark);
+  pdf.text("Il a été arrêté et convenu ce qui suit :", ml, y);
+  y += 7;
+
+  // ── ARTICLES ───────────────────────────────────────────────────────────────
+
+  const articleHeader = (num, title) => {
+    if (y > 255) { pdf.addPage(); y = 15; }
+    pdf.setFillColor(240, 250, 247);
+    pdf.rect(ml, y, cw, 7, "F");
+    pdf.setDrawColor(...teal); pdf.setLineWidth(0.5);
+    pdf.rect(ml, y, cw, 7);
+    pdf.setTextColor(...teal); pdf.setFontSize(9); pdf.setFont("helvetica","bold");
+    pdf.text(`Article ${num} : ${title}`, ml + 3, y + 5);
+    y += 10;
+    setDark();
   };
-  drawParty(ml, "LE PRESTATAIRE", [COCON_INFO.nom, COCON_INFO.adresse, `SIRET : ${COCON_INFO.siret}`, `Tél : ${COCON_INFO.tel}`, `Représenté par : ${COCON_INFO.representant}`]);
-  drawParty(ml + hw + 8, "LE CLIENT", [c.clientNom, c.clientResponsable ? `Représenté par : ${c.clientResponsable}` : null, c.clientAdresse, c.clientTel ? `Tél : ${c.clientTel}` : null, c.clientEmail || null]);
-  y += 46;
 
-  if (c.adresseIntervention && c.adresseIntervention !== c.clientAdresse) {
-    pdf.setFillColor(230, 248, 242); pdf.rect(ml, y, cw, 10, "F");
-    pdf.setTextColor(...gray); pdf.setFontSize(8); pdf.setFont("helvetica", "bold");
-    pdf.text("LIEU D'INTERVENTION : ", ml + 4, y + 6);
-    pdf.setFont("helvetica", "normal"); pdf.setTextColor(...dark);
-    pdf.text(c.adresseIntervention, ml + 46, y + 6);
-    y += 15;
+  const writeLine = (text, indent = 0) => {
+    if (y > 268) { pdf.addPage(); y = 15; }
+    const lines = pdf.splitTextToSize(text, cw - indent - 2);
+    lines.forEach(l => {
+      if (y > 268) { pdf.addPage(); y = 15; }
+      pdf.text(l, ml + indent, y);
+      y += 5;
+    });
+  };
+
+  const writeBold = (label, value) => {
+    if (y > 268) { pdf.addPage(); y = 15; }
+    pdf.setFont("helvetica","bold"); pdf.setFontSize(9);
+    pdf.text(label, ml, y);
+    pdf.setFont("helvetica","normal");
+    const lw = pdf.getTextWidth(label);
+    pdf.text(value, ml + lw + 1, y);
+    y += 5;
+  };
+
+  const checkbox = (checked, text) => {
+    if (y > 268) { pdf.addPage(); y = 15; }
+    pdf.setDrawColor(...dark); pdf.setLineWidth(0.3);
+    pdf.rect(ml, y - 3.5, 4, 4);
+    if (checked) {
+      pdf.setFont("helvetica","bold"); pdf.setFontSize(9); pdf.setTextColor(...teal);
+      pdf.text("✓", ml + 0.5, y);
+    }
+    setDark(); pdf.setFontSize(9);
+    pdf.text(text, ml + 7, y);
+    y += 5.5;
+  };
+
+  const prestations = c.prestations || [];
+  const nb = parseInt(c.nbPassages) || 4;
+  const mHT = parseFloat(c.montantHT) || 0;
+  const mTTC = parseFloat(c.montantTTC) || 0;
+  const annuelHT = (mHT * nb).toFixed(2);
+  const annuelTTC = (mTTC * nb).toFixed(2);
+  const intervalMois = Math.round(12 / nb);
+  const preavis = parseInt(c.preavis) || 1;
+  const frais = parseFloat(c.fraisDeplacement) || 30;
+  const lieuIntervention = c.adresseIntervention || c.clientAdresse || "—";
+
+  // ART 1
+  articleHeader("1", "Descriptif de la prestation");
+  pdf.setFontSize(9); setDark();
+  checkbox(prestations.includes("Désinsectisation"), "Désinsectisation");
+  checkbox(prestations.includes("Dératisation"), "Dératisation");
+  checkbox(prestations.includes("HACCP"), "Dératisation et/ou désinsectisation conforme HACCP pour les zones alimentaires");
+  checkbox(prestations.includes("Désinfection"), "Désinfection");
+  y += 2;
+  writeLine("Sur les lieux suivants :");
+  writeLine(`•  ${lieuIntervention}`, 4);
+  y += 2;
+  setBold(); pdf.setFontSize(9);
+  writeLine("Nature de l'intervention :");
+  setDark(); pdf.setFontSize(9);
+  writeLine("Le prestataire interviendra pour l'élimination et le contrôle des nuisibles présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.");
+  y += 3;
+
+  // ART 2
+  articleHeader("2", "Modalités de rémunération");
+  pdf.setFontSize(9); setDark();
+  writeLine(`Le client s'engage à verser une rémunération au Prestataire d'un montant de ${annuelHT} € HT (soit ${annuelTTC} € TTC) pour les ${nb} passages annuels.`);
+  y += 3;
+
+  // ART 3
+  articleHeader("3", "Fréquence et durée d'engagement");
+  pdf.setFontSize(9); setDark();
+  writeLine(`Nombre de passages annuels pour le traitement : ${nb} (tous les ${intervalMois} mois)`);
+  y += 2;
+  writeBold("Durée d'engagement : ", "1 an à compter de la date de la première intervention.");
+  y += 1;
+  writeLine("Le contrat est renouvelable par tacite reconduction, sauf dénonciation par l'une des parties dans les conditions prévues à l'article 5.");
+  y += 3;
+
+  // ART 4
+  articleHeader("4", "Engagements et obligations du client");
+  pdf.setFontSize(9); setDark();
+  writeLine("Le client s'engage à :");
+  [
+    "Laisser au prestataire et à son personnel libre accès aux locaux, et particulièrement à ceux nommément désignés, chaque fois que cela sera nécessaire pour la réalisation des interventions.",
+    "Ne pas faire usage d'autres produits ou autres procédés pendant la durée du contrat qui pourraient être nuisibles à l'efficacité des interventions.",
+    "Ne pas déplacer les postes d'appâtage ou autre dispositif.",
+    "Respecter les consignes et prescriptions de nos intervenants.",
+  ].forEach(b => writeLine(`•  ${b}`, 4));
+  y += 2;
+  setBold(); pdf.setFontSize(9); writeLine("Précautions à prendre :");
+  setDark(); pdf.setFontSize(9);
+  writeLine("Nous utilisons des produits chimiques. Les enfants, animaux et végétaux doivent impérativement rester à l'écart des locaux traités pendant toute la durée des traitements. Le client s'engage à veiller à cette obligation, et d'en informer son entourage, son personnel et sa clientèle.");
+  y += 2;
+  setBold(); pdf.setFontSize(9); writeLine("Dommages causés par les nuisibles :");
+  setDark(); pdf.setFontSize(9);
+  writeLine("Le prestataire décline toute responsabilité pour les dommages causés par les rongeurs et les insectes aux installations, machines, matériels et marchandises. Il en est de même pour tout dommage direct ou indirect causé par les rongeurs et insectes aux personnes ou animaux.");
+  y += 3;
+
+  // ART 5
+  articleHeader("5", "Durée de validité du contrat");
+  pdf.setFontSize(9); setDark();
+  writeLine("Le contrat est conclu pour une durée déterminée de 1 an.");
+  writeLine("La validité du contrat commence dès la signature du présent contrat et se termine à la fin des prestations convenues entre les parties.");
+  writeLine(`Chacune des parties peut y mettre fin avec un préavis de ${preavis} mois.`);
+  writeLine("La durée du contrat peut être élargie par un consensus écrit des deux parties.");
+  y += 3;
+
+  // ART 6
+  articleHeader("6", "Obligation de délivrance");
+  pdf.setFontSize(9); setDark();
+  writeLine("Les délais de l'intervention ne sont donnés qu'à titre indicatif ; ils ne constituent aucun engagement de notre part.");
+  writeLine(`Dans le cas d'un rendez-vous, si l'intervention n'a pas été effectuée en raison d'un empêchement de la part du client, le déplacement sera facturé : ${frais.toFixed(2)} €.`);
+  y += 3;
+
+  // ART 7
+  articleHeader("7", "Rupture du contrat");
+  pdf.setFontSize(9); setDark();
+  writeLine("Pour tout manquement des obligations par l'une des parties, l'autre partie pourra invoquer son droit de résiliation du contrat à tacite reconduction dans le cas où la mise en demeure persiste au-delà d'un mois.");
+  y += 3;
+
+  // ART 8
+  articleHeader("8", "Loi applicable");
+  pdf.setFontSize(9); setDark();
+  writeLine("Le présent contrat est soumis aux lois françaises. En l'absence de la bonne exécution du contrat, ce dernier sera soumis par les tribunaux compétents de Fort-de-France, soumis au droit français.");
+  y += 3;
+
+  // ART 9
+  articleHeader("9", "Modifications du contrat");
+  pdf.setFontSize(9); setDark();
+  writeLine("Chaque modification du contrat fera l'objet d'une signature entre chaque Partie ou leurs représentants autorisés.");
+  y += 6;
+
+  // ── SIGNATURES ─────────────────────────────────────────────────────────────
+  if (y > 230) { pdf.addPage(); y = 15; }
+
+  const [jj, mm2, aaaa] = (c.dateSignature || todayStr()).split("-").reverse();
+  const dateFr = `${jj} / ${mm2} / ${aaaa}`;
+  pdf.setFontSize(10); setBold();
+  pdf.text(`Fait le ${dateFr} en deux exemplaires à Fort-de-France`, W / 2, y, { align:"center" });
+  y += 8;
+
+  // Tableau signatures
+  const sigHW = (cw / 2) - 2;
+  pdf.setFillColor(...teal); pdf.rect(ml, y, sigHW, 7, "F");
+  pdf.rect(colR, y, sigHW, 7, "F");
+  pdf.setTextColor(255,255,255); pdf.setFontSize(9); pdf.setFont("helvetica","bold");
+  pdf.text("Le Prestataire", ml + sigHW/2, y + 5, { align:"center" });
+  pdf.text("Le Client", colR + sigHW/2, y + 5, { align:"center" });
+  y += 7;
+  pdf.setDrawColor(200,200,200); pdf.setLineWidth(0.3);
+  pdf.rect(ml, y, sigHW, 32); pdf.rect(colR, y, sigHW, 32);
+  setGray(); pdf.setFontSize(8);
+  pdf.text("Signature :", ml + 3, y + 8);
+  pdf.text("Nom : " + COCON_INFO.representant, ml + 3, y + 20);
+  pdf.text("Signature :", colR + 3, y + 8);
+  pdf.text("Nom : " + (c.clientNom || ""), colR + 3, y + 20);
+  y += 36;
+
+  // Footer
+  pdf.setFontSize(7.5); pdf.setFont("helvetica","italic"); pdf.setTextColor(...gray);
+  pdf.text("Paraphez chaque page du contrat", W / 2, y, { align:"center" });
+
+  // Pied de page sur toutes les pages
+  const totalPages = pdf.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(7); pdf.setFont("helvetica","normal"); pdf.setTextColor(...gray);
+    pdf.text(
+      `${COCON_INFO.nom} — ${COCON_INFO.adresse} — SIRET : ${COCON_INFO.siret} — ${COCON_INFO.tel} — ${COCON_INFO.web}`,
+      W / 2, 292, { align: "center" }
+    );
+    pdf.text(`Page ${i} / ${totalPages}`, mr, 292, { align: "right" });
   }
 
-  const article = (num, title, body) => {
-    if (y > 250) { pdf.addPage(); y = 20; }
-    pdf.setFillColor(...teal); pdf.rect(ml, y, cw, 7, "F");
-    pdf.setTextColor(255, 255, 255); pdf.setFontSize(9); pdf.setFont("helvetica", "bold");
-    pdf.text(`ARTICLE ${num} — ${title.toUpperCase()}`, ml + 4, y + 5);
-    y += 10;
-    pdf.setTextColor(...dark); pdf.setFont("helvetica", "normal"); pdf.setFontSize(9);
-    const lines = pdf.splitTextToSize(body, cw - 4);
-    lines.forEach(line => { if (y > 272) { pdf.addPage(); y = 20; } pdf.text(line, ml + 2, y); y += 5; });
-    y += 4;
-  };
-
-  const prestStr = (c.prestations || []).join(", ") || "—";
-  const mTTC = parseFloat(c.montantTTC) || 0, mHT = parseFloat(c.montantHT) || 0;
-  const nb = parseInt(c.nbPassages) || 4, frais = parseFloat(c.fraisDeplacement) || 0;
-  const preavis = parseInt(c.preavis) || 1, annuel = (mTTC * nb).toFixed(2);
-  const intervalMois = Math.round(12 / nb);
-
-  article("1", "Descriptif de la prestation",
-    `Le prestataire s'engage à réaliser les prestations suivantes au profit du client :\n${prestStr}.\n\nCes interventions comprennent la fourniture des produits homologués, du matériel et de la main-d'œuvre nécessaires à la bonne exécution des travaux.`);
-  article("2", "Modalités de rémunération",
-    `En contrepartie des prestations réalisées, le client s'engage à régler la somme de ${mTTC.toFixed(2)} € TTC (${mHT.toFixed(2)} € HT) par passage, soit un montant annuel de ${annuel} € TTC pour ${nb} passage(s).\n\nEn cas d'absence du client lors d'une intervention planifiée, des frais de déplacement de ${frais} € seront facturés.`);
-  article("3", "Fréquence et durée d'engagement",
-    `Les interventions seront réalisées à raison de ${nb} passage(s) par an, soit environ tous les ${intervalMois} mois, selon un calendrier convenu d'un commun accord.\n\nLe présent contrat est conclu pour une durée d'un (1) an à compter du ${fmtDate(c.dateDebut)}, soit jusqu'au ${fmtDate(c.dateFin)}.`);
-  article("4", "Engagements et obligations du client",
-    `Le client s'engage à :\n- Permettre l'accès aux locaux aux techniciens aux dates convenues ;\n- Respecter les consignes d'utilisation et de sécurité données après chaque intervention ;\n- Informer le prestataire de tout changement susceptible d'affecter les prestations ;\n- Régler les sommes dues dans les délais impartis.`);
-  article("5", "Durée de validité du contrat",
-    `Le présent contrat prend effet à compter de la date de signature et est valable pour une durée d'un (1) an. Il est renouvelable par accord exprès ou par tacite reconduction.`);
-  article("6", "Obligation de délivrance",
-    `Le prestataire s'engage à réaliser les prestations avec tout le soin et le professionnalisme requis. Un bon d'intervention signé sera remis au client à l'issue de chaque passage.`);
-  article("7", "Rupture du contrat",
-    `Chacune des parties peut mettre fin au présent contrat moyennant un préavis de ${preavis} mois, notifié par lettre recommandée avec accusé de réception.`);
-  article("8", "Loi applicable",
-    `Le présent contrat est soumis au droit français. Tout litige sera porté devant les tribunaux compétents de Fort-de-France, Martinique.`);
-  article("9", "Modifications du contrat",
-    `Toute modification devra faire l'objet d'un avenant écrit, daté et signé par les deux parties.`);
-
-  if (y > 235) { pdf.addPage(); y = 20; }
-  y += 4;
-  pdf.setFillColor(...teal); pdf.rect(ml, y, cw, 7, "F");
-  pdf.setTextColor(255, 255, 255); pdf.setFontSize(9); pdf.setFont("helvetica", "bold");
-  pdf.text("SIGNATURES", ml + 4, y + 5); y += 12;
-  pdf.setTextColor(...dark); pdf.setFontSize(9); pdf.setFont("helvetica", "normal");
-  pdf.text(`Fait à Fort-de-France, le ${fmtDate(c.dateSignature)}`, ml, y); y += 10;
-  pdf.text("Le Prestataire", ml + 4, y); pdf.text("Le Client", ml + 100, y); y += 4;
-  pdf.setFontSize(8); pdf.setTextColor(...gray);
-  pdf.text(COCON_INFO.nom, ml + 4, y);
-  pdf.text(c.clientNom + (c.clientResponsable ? ` — ${c.clientResponsable}` : ""), ml + 100, y); y += 4;
-  pdf.setDrawColor(200, 200, 200); pdf.rect(ml, y, 82, 28); pdf.rect(ml + 98, y, 82, 28);
-  pdf.setFontSize(7); pdf.setTextColor(...gray);
-  pdf.text(`${COCON_INFO.nom} — ${COCON_INFO.adresse} — SIRET : ${COCON_INFO.siret} — ${COCON_INFO.tel} — ${COCON_INFO.web}`, W / 2, 288, { align: "center" });
-  pdf.save(`contrat-${c.ref}-${c.clientNom.replace(/\s+/g, "-")}.pdf`);
+  pdf.save(`contrat-${c.ref}-${(c.clientNom||"").replace(/\s+/g,"-")}.pdf`);
 }
+
 
 // ── COMPOSANT PRINCIPAL ───────────────────────────────────────────────────────
 
