@@ -213,19 +213,38 @@ export default function ContratModule() {
   const [newRelanceDate, setNewRelanceDate] = useState("");
   const [newRelanceNote, setNewRelanceNote] = useState("");
 
-  useEffect(() => { fetchContrats(); }, []);
+  useEffect(() => {
+    fetchContrats();
+    if (!document.getElementById("ctr-styles")) {
+      const el = document.createElement("style");
+      el.id = "ctr-styles"; el.textContent = TABLE_CSS;
+      document.head.appendChild(el);
+    }
+  }, []);
 
   // ── FIRESTORE ─────────────────────────────────────────────────────────────
 
-  const fetchContrats = async () => {
+  const fetchContrats = async (currentSel) => {
     const snap = await getDocs(collection(db, "contrats"));
     const all = snap.docs
-      .map(d => { const data = { id: d.id, ...d.data() }; return { ...data, sc: computeStatut(data) }; })
+      .map(d => {
+        const data = { id: d.id, ...d.data() };
+        data.passages = data.passages || [];
+        data.relances = data.relances || [];
+        return { ...data, sc: computeStatut(data) };
+      })
       .sort((a, b) => {
         const order = { "à renouveler": 0, "expiré": 1, "brouillon": 2, "actif": 3, "résilié": 4 };
         return (order[a.sc] ?? 5) - (order[b.sc] ?? 5);
       });
     setContrats(all);
+    // Resync selected depuis Firestore pour rafraichir date + relances + KPI
+    const sel = currentSel || null;
+    if (sel) {
+      const fresh = all.find(c => c.id === sel.id);
+      if (fresh) setSelected(fresh);
+    }
+    return all;
   };
 
   const nextRef = (list) => {
@@ -267,7 +286,7 @@ export default function ContratModule() {
     const refreshed = { ...selected, passages: updated };
     setSelected({ ...refreshed, sc: computeStatut(refreshed) });
     setNewPassage("");
-    fetchContrats();
+    fetchContrats(refreshed);
   };
 
   const removePassage = async (idx) => {
@@ -275,7 +294,7 @@ export default function ContratModule() {
     await updateDoc(doc(db, "contrats", selected.id), { passages: updated });
     const refreshed = { ...selected, passages: updated };
     setSelected({ ...refreshed, sc: computeStatut(refreshed) });
-    fetchContrats();
+    fetchContrats(refreshed);
   };
 
   const addRelance = async () => {
@@ -289,7 +308,7 @@ export default function ContratModule() {
     setSelected({ ...refreshed, sc: computeStatut(refreshed) });
     setNewRelanceDate("");
     setNewRelanceNote("");
-    fetchContrats();
+    fetchContrats(refreshed);
   };
 
   const removeRelance = async (idx) => {
@@ -297,7 +316,7 @@ export default function ContratModule() {
     await updateDoc(doc(db, "contrats", selected.id), { relances: updated });
     const refreshed = { ...selected, relances: updated };
     setSelected({ ...refreshed, sc: computeStatut(refreshed) });
-    fetchContrats();
+    fetchContrats(refreshed);
   };
 
   const renouveler = async (c) => {
@@ -657,12 +676,6 @@ export default function ContratModule() {
     .ctr-panel-title{font-size:12px;font-weight:600;color:#1a1a1a;margin:0}
     .ctr-panel-count{font-size:11px;color:#888;margin-left:auto}
   `;
-
-  if (!document.getElementById("ctr-styles")) {
-    const el = document.createElement("style");
-    el.id = "ctr-styles"; el.textContent = TABLE_CSS;
-    document.head.appendChild(el);
-  }
 
   const badgeClass = (sc) => ({
     "actif":"actif","à renouveler":"renouveler","expiré":"expire","résilié":"resilie","brouillon":"brouillon"
