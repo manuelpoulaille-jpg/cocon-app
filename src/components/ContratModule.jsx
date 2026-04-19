@@ -110,227 +110,349 @@ function statutStyle(s) {
 // ── PDF ───────────────────────────────────────────────────────────────────────
 
 async function generatePDF(c) {
-  const nb         = parseInt(c.nbPassages) || 4;
-  const mHT        = parseFloat(c.montantHT)  || 0;
-  const mTTC       = parseFloat(c.montantTTC) || 0;
-  const annuelHT   = (mHT  * nb).toFixed(2);
-  const annuelTTC  = (mTTC * nb).toFixed(2);
-  const intervalM  = Math.round(12 / nb);
-  const preavis    = parseInt(c.preavis) || 1;
-  const frais      = parseFloat(c.fraisDeplacement) || 30;
-  const lieu       = c.adresseIntervention || c.clientAdresse || "—";
-  const prest      = c.prestations || [];
-  const [jj,mm2,aaaa] = (c.dateSignature || todayStr()).split("-").reverse();
-  const dateFr     = `${jj} / ${mm2} / ${aaaa}`;
+  const {
+    Document, Packer, Paragraph, Table, TableRow, TableCell,
+    TextRun, AlignmentType, WidthType, BorderStyle,
+    ShadingType, VerticalAlign, HeadingLevel,
+  } = await import("docx");
 
-  const chk = (checked) =>
-    `<span style="display:inline-block;width:12px;height:12px;border:1.5px solid #222;margin-right:6px;text-align:center;line-height:10px;font-size:10px;color:#35B499;font-weight:bold;">${checked ? "✓" : "&nbsp;"}</span>`;
+  const TEAL   = "35B499";
+  const WHITE  = "FFFFFF";
+  const DARK   = "1A1A1A";
+  const LIGHT  = "F0FAF6";
+  const GRAY   = "888888";
+  const BORDER = { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" };
+  const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const ALL_BORDERS = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+  const CELL_MARGIN = { top: 60, bottom: 60, left: 100, right: 100 };
 
-  const art = (num, title) =>
-    `<tr><td colspan="2" style="background:#35B499;color:white;font-weight:bold;padding:5px 8px;font-size:10pt;">Article ${num} : ${title}</td></tr>`;
+  const nb        = parseInt(c.nbPassages) || 4;
+  const mHT       = parseFloat(c.montantHT)  || 0;
+  const mTTC      = parseFloat(c.montantTTC) || 0;
+  const annuelHT  = (mHT  * nb).toFixed(2);
+  const annuelTTC = (mTTC * nb).toFixed(2);
+  const intervalM = Math.round(12 / nb);
+  const preavis   = parseInt(c.preavis)           || 1;
+  const frais     = parseFloat(c.fraisDeplacement) || 30;
+  const lieu      = c.adresseIntervention || c.clientAdresse || "—";
+  const prest     = c.prestations || [];
+  const [jj, mm2, aaaa] = (c.dateSignature || todayStr()).split("-").reverse();
+  const dateFr    = `${jj} / ${mm2} / ${aaaa}`;
 
-  const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"/>
-<title>Contrat ${c.ref} — ${c.clientNom}</title>
-<style>
-  @page { size: A4; margin: 18mm 15mm 20mm 15mm; }
-  * { box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; font-size: 9.5pt; color: #1a1a1a; margin:0; padding:0; }
-  h1  { text-align:center; color:#35B499; font-size:14pt; margin:0 0 2px; }
-  .sub{ text-align:center; color:#666; font-style:italic; font-size:9pt; margin:0 0 8px; }
-  .divider { border:none; border-top:1.5px solid #35B499; margin:6px 0 10px; }
-  table { width:100%; border-collapse:collapse; margin-bottom:10px; }
-  td, th { padding:4px 7px; font-size:9pt; vertical-align:top; }
-  .parties th { background:#35B499; color:white; font-size:9.5pt; text-align:center; padding:5px; }
-  .parties td { border:0.5px solid #ccc; }
-  .parties td:nth-child(odd)  { background:#f8f8f8; }
-  .parties td:nth-child(even) { background:#ffffff; }
-  .parties .footer-row td { background:#35B499 !important; color:white; font-style:italic; text-align:center; font-size:8.5pt; padding:3px; }
-  .conv { font-weight:bold; margin:8px 0 6px; font-size:10pt; }
-  .articles td { border:0.5px solid #ccc; padding:5px 8px; }
-  .articles .art-header td { background:#35B499; color:white; font-weight:bold; padding:5px 8px; font-size:10pt; }
-  .articles .content td { padding:6px 10px; }
-  .articles .content-bg td { background:#f0faf6; padding:6px 10px; }
-  p { margin:3px 0 5px; line-height:1.45; }
-  ul { margin:2px 0 4px 0; padding-left:18px; }
-  li { margin-bottom:2px; line-height:1.4; }
-  .bold { font-weight:bold; }
-  .section-title { font-weight:bold; margin-top:5px; margin-bottom:2px; }
-  .chk-line { margin:3px 0; display:flex; align-items:center; }
-  .sig-table th { background:#35B499; color:white; font-weight:bold; text-align:center; padding:5px; }
-  .sig-table td { border:0.5px solid #ccc; height:70px; padding:8px; vertical-align:top; font-size:8.5pt; color:#555; }
-  .fait { text-align:center; font-weight:bold; font-size:10pt; margin:10px 0 6px; }
-  .paraphez { text-align:center; font-style:italic; font-size:8pt; color:#666; margin-top:6px; }
-  .footer-page { text-align:center; font-size:7.5pt; color:#999; font-style:italic; border-top:0.5px solid #ddd; padding-top:4px; margin-top:10px; }
-  @media print {
-    body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .no-print { display:none; }
-  }
-</style>
-</head>
-<body>
+  // ── HELPERS ────────────────────────────────────────────────────────────────
 
-<div class="no-print" style="background:#35B499;color:white;padding:10px 16px;font-family:Arial;font-size:13px;display:flex;align-items:center;justify-content:space-between;">
-  <span>📄 Contrat ${c.ref} — ${c.clientNom} — Prêt à imprimer</span>
-  <button onclick="window.print()" style="background:white;color:#35B499;border:none;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">🖨️ Imprimer / Enregistrer en PDF</button>
-</div>
+  const t = (text, opts = {}) => new TextRun({
+    text, font: "Arial", size: opts.size || 22,
+    bold: opts.bold || false, italics: opts.italic || false,
+    color: opts.color || DARK,
+  });
 
-<h1>Contrat dératisation / désinsectisation</h1>
-<p class="sub">La maison protégée – Solutions antiparasitaires</p>
-<hr class="divider"/>
+  const p = (runs, opts = {}) => new Paragraph({
+    children: Array.isArray(runs) ? runs : [runs],
+    alignment: opts.align || AlignmentType.LEFT,
+    spacing: { before: opts.before || 40, after: opts.after || 40 },
+    indent: opts.indent ? { left: opts.indent } : undefined,
+  });
 
-<!-- PARTIES -->
-<table class="parties">
-  <tr>
-    <th style="width:50%">Le Prestataire</th>
-    <th style="width:50%">Le Client</th>
-  </tr>
-  <tr>
-    <td><span class="bold">Raison sociale :</span> Cocon Plus SARL</td>
-    <td><span class="bold">Nom et Prénom :</span> ${c.clientNom}${c.clientResponsable ? " — " + c.clientResponsable : ""}</td>
-  </tr>
-  <tr>
-    <td><span class="bold">Adresse :</span> Berges de Kerlys, 97200 Fort-de-France</td>
-    <td><span class="bold">Adresse :</span> ${c.clientAdresse || "—"}</td>
-  </tr>
-  <tr>
-    <td><span class="bold">SIRET :</span> 47756829900028</td>
-    <td><span class="bold">SIRET :</span> &nbsp;</td>
-  </tr>
-  <tr>
-    <td><span class="bold">Représenté par :</span> Jean-Marc SERVAND</td>
-    <td><span class="bold">Représenté par :</span> ${c.clientResponsable || "&nbsp;"}</td>
-  </tr>
-  <tr>
-    <td><span class="bold">Téléphone :</span> 0596 73 66 66 / 06 96 69 48 00</td>
-    <td><span class="bold">Téléphone :</span> ${c.clientTel || "—"}</td>
-  </tr>
-  <tr>
-    <td><span class="bold">Email :</span> contact@cocon-plus.fr</td>
-    <td><span class="bold">Email :</span> ${c.clientEmail || "—"}</td>
-  </tr>
-  <tr class="footer-row">
-    <td>Ci-après désigné "Le Prestataire"</td>
-    <td>Ci-après désigné "Le Client"</td>
-  </tr>
-</table>
+  const tealCell = (text, colSpan = 1) => new TableCell({
+    children: [p(t(text, { bold: true, color: WHITE, size: 20 }), { align: AlignmentType.CENTER, before: 0, after: 0 })],
+    columnSpan: colSpan,
+    shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+    borders: ALL_BORDERS,
+    margins: { top: 80, bottom: 80, left: 100, right: 100 },
+    verticalAlign: VerticalAlign.CENTER,
+  });
 
-<p class="conv">Il a été arrêté et convenu ce qui suit :</p>
+  const lightCell = (runs, shade = false) => new TableCell({
+    children: [new Paragraph({ children: Array.isArray(runs) ? runs : [runs], spacing: { before: 40, after: 40 } })],
+    shading: shade ? { type: ShadingType.SOLID, color: "F5F5F5", fill: "F5F5F5" } : undefined,
+    borders: ALL_BORDERS,
+    margins: CELL_MARGIN,
+  });
 
-<!-- ARTICLES -->
-<table class="articles">
+  const boldLabel = (label, value) => [
+    t(label, { bold: true, size: 20 }),
+    t(" " + value, { size: 20 }),
+  ];
 
-  <!-- ART 1 -->
-  <tr class="art-header"><td>Article 1 : Descriptif de la prestation</td></tr>
-  <tr class="content"><td>
-    <div class="chk-line">${chk(prest.includes("Désinsectisation"))} Désinsectisation</div>
-    <div class="chk-line">${chk(prest.includes("Dératisation"))} Dératisation</div>
-    <div class="chk-line">${chk(prest.includes("HACCP"))} Dératisation et/ou désinsectisation conforme HACCP pour les zones alimentaires</div>
-    <div class="chk-line">${chk(prest.includes("Désinfection"))} Désinfection</div>
-    <p style="margin-top:6px;">Sur les lieux suivants :</p>
-    <p style="margin-left:12px;">• &nbsp;${lieu}</p>
-    <p class="section-title">Nature de l'intervention :</p>
-    <p>Le prestataire interviendra pour l'élimination et le contrôle des nuisibles présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.</p>
-  </td></tr>
+  const articleHeader = (num, title) => new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [new TableRow({ children: [tealCell(`Article ${num} : ${title}`)] })],
+    margins: { top: 120 },
+  });
 
-  <!-- ART 2 -->
-  <tr class="art-header"><td>Article 2 : Modalités de rémunération</td></tr>
-  <tr class="content-bg"><td>
-    <p>Le client s'engage à verser une rémunération au Prestataire d'un montant de <strong>${annuelHT} € HT</strong> (soit <strong>${annuelTTC} € TTC</strong>) pour les ${nb} passages annuels.</p>
-  </td></tr>
+  const contentRow = (paragraphs, shade = false) => new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [new TableRow({
+      children: [new TableCell({
+        children: paragraphs,
+        shading: shade ? { type: ShadingType.SOLID, color: "F0FAF6", fill: "F0FAF6" } : undefined,
+        borders: ALL_BORDERS,
+        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+      })],
+    })],
+  });
 
-  <!-- ART 3 -->
-  <tr class="art-header"><td>Article 3 : Fréquence et durée d'engagement</td></tr>
-  <tr class="content"><td>
-    <p>Nombre de passages annuels pour le traitement : <strong>${nb} (tous les ${intervalM} mois)</strong></p>
-    <p><span class="bold">Durée d'engagement :</span> 1 an à compter de la date de la première intervention.</p>
-    <p>Le contrat est renouvelable par tacite reconduction, sauf dénonciation par l'une des parties dans les conditions prévues à l'article 5.</p>
-  </td></tr>
+  const chk = (checked, label) => p([
+    t(checked ? "☑" : "☐", { color: checked ? TEAL : DARK, size: 22 }),
+    t("  " + label, { size: 20 }),
+  ], { before: 30, after: 30 });
 
-  <!-- ART 4 -->
-  <tr class="art-header"><td>Article 4 : Engagements et obligations du client</td></tr>
-  <tr class="content-bg"><td>
-    <p>Le client s'engage à :</p>
-    <ul>
-      <li>Laisser au prestataire et à son personnel libre accès aux locaux, et particulièrement à ceux nommément désignés, chaque fois que cela sera nécessaire pour la réalisation des interventions.</li>
-      <li>Ne pas faire usage d'autres produits ou autres procédés pendant la durée du contrat qui pourraient être nuisibles à l'efficacité des interventions.</li>
-      <li>Ne pas déplacer les postes d'appâtage ou autre dispositif.</li>
-      <li>Respecter les consignes et prescriptions de nos intervenants.</li>
-    </ul>
-    <p class="section-title">Précautions à prendre :</p>
-    <p>Nous utilisons des produits chimiques. Les enfants, animaux et végétaux doivent impérativement rester à l'écart des locaux traités pendant toute la durée des traitements. Le client s'engage à veiller à cette obligation, et d'en informer son entourage, son personnel et sa clientèle.</p>
-    <p class="section-title">Dommages causés par les nuisibles :</p>
-    <p>Le prestataire décline toute responsabilité pour les dommages causés par les rongeurs et les insectes aux installations, machines, matériels et marchandises. Il en est de même pour tout dommage direct ou indirect causé par les rongeurs et insectes aux personnes ou animaux.</p>
-  </td></tr>
+  const bullet = (text) => new Paragraph({
+    children: [t("•  " + text, { size: 20 })],
+    indent: { left: 360 },
+    spacing: { before: 30, after: 30 },
+  });
 
-  <!-- ART 5 -->
-  <tr class="art-header"><td>Article 5 : Durée de validité du contrat</td></tr>
-  <tr class="content"><td>
-    <p>Le contrat est conclu pour une durée déterminée de 1 an.</p>
-    <p>La validité du contrat commence dès la signature du présent contrat et se termine à la fin des prestations convenues entre les parties.</p>
-    <p>Chacune des parties peut y mettre fin avec un préavis de ${preavis} mois.</p>
-    <p>La durée du contrat peut être élargie par un consensus écrit des deux parties.</p>
-  </td></tr>
+  const spacer = () => p(t(" ", { size: 8 }), { before: 0, after: 0 });
 
-  <!-- ART 6 -->
-  <tr class="art-header"><td>Article 6 : Obligation de délivrance</td></tr>
-  <tr class="content-bg"><td>
-    <p>Les délais de l'intervention ne sont donnés qu'à titre indicatif ; ils ne constituent aucun engagement de notre part.</p>
-    <p>Dans le cas d'un rendez-vous, si l'intervention n'a pas été effectuée en raison d'un empêchement de la part du client, le déplacement sera facturé : <strong>${frais.toFixed(2)} €</strong>.</p>
-  </td></tr>
+  // ── TABLEAU PARTIES ────────────────────────────────────────────────────────
 
-  <!-- ART 7 -->
-  <tr class="art-header"><td>Article 7 : Rupture du contrat</td></tr>
-  <tr class="content"><td>
-    <p>Pour tout manquement des obligations par l'une des parties, l'autre partie pourra invoquer son droit de résiliation du contrat à tacite reconduction dans le cas où la mise en demeure persiste au-delà d'un mois.</p>
-  </td></tr>
+  const partyRows = [
+    ["Raison sociale :", "Cocon Plus SARL",       "Nom et Prénom :", c.clientNom + (c.clientResponsable ? " — " + c.clientResponsable : "")],
+    ["Adresse :",        "Berges de Kerlys, 97200 Fort-de-France", "Adresse :", c.clientAdresse || "—"],
+    ["SIRET :",          "47756829900028",         "SIRET :",          ""],
+    ["Représenté par :", "Jean-Marc SERVAND",      "Représenté par :", c.clientResponsable || ""],
+    ["Téléphone :",      "0596 73 66 66 / 06 96 69 48 00", "Téléphone :", c.clientTel || "—"],
+    ["Email :",          "contact@cocon-plus.fr",  "Email :",           c.clientEmail || "—"],
+  ];
 
-  <!-- ART 8 -->
-  <tr class="art-header"><td>Article 8 : Loi applicable</td></tr>
-  <tr class="content-bg"><td>
-    <p>Le présent contrat est soumis aux lois françaises. En l'absence de la bonne exécution du contrat, ce dernier sera soumis par les tribunaux compétents de Fort-de-France, soumis au droit français.</p>
-  </td></tr>
+  const partiesTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      // En-tête
+      new TableRow({
+        children: [
+          tealCell("Le Prestataire"),
+          tealCell("Le Client"),
+        ],
+      }),
+      // Données
+      ...partyRows.map((r, i) => new TableRow({
+        children: [
+          lightCell(boldLabel(r[0], r[1]), i % 2 === 0),
+          lightCell(boldLabel(r[2], r[3]), i % 2 === 0),
+        ],
+      })),
+      // Footer
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [p(t('Ci-après désigné "Le Prestataire"', { italic: true, size: 18, color: WHITE }), { align: AlignmentType.CENTER, before: 0, after: 0 })],
+            shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+            borders: ALL_BORDERS,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          }),
+          new TableCell({
+            children: [p(t('Ci-après désigné "Le Client"', { italic: true, size: 18, color: WHITE }), { align: AlignmentType.CENTER, before: 0, after: 0 })],
+            shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+            borders: ALL_BORDERS,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          }),
+        ],
+      }),
+    ],
+  });
 
-  <!-- ART 9 -->
-  <tr class="art-header"><td>Article 9 : Modifications du contrat</td></tr>
-  <tr class="content"><td>
-    <p>Chaque modification du contrat fera l'objet d'une signature entre chaque Partie ou leurs représentants autorisés.</p>
-  </td></tr>
+  // ── TABLEAU SIGNATURES ────────────────────────────────────────────────────
 
-</table>
+  const sigTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({ children: [tealCell("Le Prestataire"), tealCell("Le Client")] }),
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [
+              p(t("Signature : ___________________________________", { size: 20 })),
+              spacer(), spacer(),
+              p(t("Nom : Jean-Marc SERVAND", { size: 20 })),
+            ],
+            borders: ALL_BORDERS,
+            margins: { top: 200, bottom: 200, left: 200, right: 200 },
+          }),
+          new TableCell({
+            children: [
+              p(t("Signature : ___________________________________", { size: 20 })),
+              spacer(), spacer(),
+              p(t("Nom : " + (c.clientNom || "___________________________________"), { size: 20 })),
+            ],
+            borders: ALL_BORDERS,
+            margins: { top: 200, bottom: 200, left: 200, right: 200 },
+          }),
+        ],
+      }),
+    ],
+  });
 
-<!-- SIGNATURES -->
-<p class="fait">Fait le ${dateFr} en deux exemplaires à Fort-de-France</p>
+  // ── DOCUMENT ──────────────────────────────────────────────────────────────
 
-<table class="sig-table">
-  <tr>
-    <th style="width:50%">Le Prestataire</th>
-    <th style="width:50%">Le Client</th>
-  </tr>
-  <tr>
-    <td>Signature : ___________________________________<br/><br/>Nom : Jean-Marc SERVAND</td>
-    <td>Signature : ___________________________________<br/><br/>Nom : ${c.clientNom || "___________________________________"}</td>
-  </tr>
-</table>
+  const doc = new Document({
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: 720, bottom: 720, left: 900, right: 900 },
+        },
+      },
+      children: [
+        // Titre
+        p(t("Contrat dératisation / désinsectisation", { bold: true, size: 28, color: TEAL }), { align: AlignmentType.CENTER, before: 0, after: 60 }),
+        p(t("La maison protégée – Solutions antiparasitaires", { italic: true, size: 20, color: GRAY }), { align: AlignmentType.CENTER, before: 0, after: 120 }),
 
-<p class="paraphez">Paraphez chaque page du contrat</p>
+        // Tableau parties
+        partiesTable,
+        spacer(),
 
-<div class="footer-page">
-  Cocon Plus SARL — Berges de Kerlys, 97200 Fort-de-France — SIRET : 47756829900028 — 0596 73 66 66 / 06 96 69 48 00 — contact@cocon-plus.fr — www.cocon-plus.fr
-</div>
+        // Convenu
+        p(t("Il a été arrêté et convenu ce qui suit :", { bold: true, size: 22 }), { before: 80, after: 120 }),
 
-</body>
-</html>`;
+        // ART 1
+        articleHeader("1", "Descriptif de la prestation"),
+        contentRow([
+          chk(prest.includes("Désinsectisation"), "Désinsectisation"),
+          chk(prest.includes("Dératisation"),     "Dératisation"),
+          chk(prest.includes("HACCP"),            "Dératisation et/ou désinsectisation conforme HACCP pour les zones alimentaires"),
+          chk(prest.includes("Désinfection"),     "Désinfection"),
+          spacer(),
+          p(t("Sur les lieux suivants :", { size: 20 })),
+          p(t("•  " + lieu, { size: 20 }), { indent: 360 }),
+          spacer(),
+          p(t("Nature de l'intervention :", { bold: true, size: 20 })),
+          p(t("Le prestataire interviendra pour l'élimination et le contrôle des nuisibles présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.", { size: 20 })),
+        ]),
 
-  const win = window.open("", "_blank");
-  if (!win) { alert("Veuillez autoriser les popups pour générer le contrat."); return; }
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-  // Déclencher l'impression après chargement
-  win.onload = () => { win.focus(); };
+        spacer(),
+
+        // ART 2
+        articleHeader("2", "Modalités de rémunération"),
+        contentRow([
+          new Paragraph({
+            children: [
+              t("Le client s'engage à verser une rémunération au Prestataire d'un montant de ", { size: 20 }),
+              t(`${annuelHT} € HT`, { bold: true, size: 20 }),
+              t(` (soit `, { size: 20 }),
+              t(`${annuelTTC} € TTC`, { bold: true, size: 20 }),
+              t(`) pour les ${nb} passages annuels.`, { size: 20 }),
+            ],
+            spacing: { before: 40, after: 40 },
+          }),
+        ], true),
+
+        spacer(),
+
+        // ART 3
+        articleHeader("3", "Fréquence et durée d'engagement"),
+        contentRow([
+          new Paragraph({
+            children: [
+              t(`Nombre de passages annuels pour le traitement : `, { size: 20 }),
+              t(`${nb} (tous les ${intervalM} mois)`, { bold: true, size: 20 }),
+            ],
+            spacing: { before: 40, after: 40 },
+          }),
+          new Paragraph({
+            children: [
+              t("Durée d'engagement : ", { bold: true, size: 20 }),
+              t("1 an à compter de la date de la première intervention.", { size: 20 }),
+            ],
+            spacing: { before: 40, after: 40 },
+          }),
+          p(t("Le contrat est renouvelable par tacite reconduction, sauf dénonciation par l'une des parties dans les conditions prévues à l'article 5.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 4
+        articleHeader("4", "Engagements et obligations du client"),
+        contentRow([
+          p(t("Le client s'engage à :", { size: 20 })),
+          bullet("Laisser au prestataire et à son personnel libre accès aux locaux, et particulièrement à ceux nommément désignés, chaque fois que cela sera nécessaire pour la réalisation des interventions."),
+          bullet("Ne pas faire usage d'autres produits ou autres procédés pendant la durée du contrat qui pourraient être nuisibles à l'efficacité des interventions."),
+          bullet("Ne pas déplacer les postes d'appâtage ou autre dispositif."),
+          bullet("Respecter les consignes et prescriptions de nos intervenants."),
+          spacer(),
+          p(t("Précautions à prendre :", { bold: true, size: 20 })),
+          p(t("Nous utilisons des produits chimiques. Les enfants, animaux et végétaux doivent impérativement rester à l'écart des locaux traités pendant toute la durée des traitements. Le client s'engage à veiller à cette obligation, et d'en informer son entourage, son personnel et sa clientèle.", { size: 20 })),
+          spacer(),
+          p(t("Dommages causés par les nuisibles :", { bold: true, size: 20 })),
+          p(t("Le prestataire décline toute responsabilité pour les dommages causés par les rongeurs et les insectes aux installations, machines, matériels et marchandises. Il en est de même pour tout dommage direct ou indirect causé par les rongeurs et insectes aux personnes ou animaux.", { size: 20 })),
+        ], true),
+
+        spacer(),
+
+        // ART 5
+        articleHeader("5", "Durée de validité du contrat"),
+        contentRow([
+          p(t("Le contrat est conclu pour une durée déterminée de 1 an.", { size: 20 })),
+          p(t("La validité du contrat commence dès la signature du présent contrat et se termine à la fin des prestations convenues entre les parties.", { size: 20 })),
+          p(t(`Chacune des parties peut y mettre fin avec un préavis de ${preavis} mois.`, { size: 20 })),
+          p(t("La durée du contrat peut être élargie par un consensus écrit des deux parties.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 6
+        articleHeader("6", "Obligation de délivrance"),
+        contentRow([
+          p(t("Les délais de l'intervention ne sont donnés qu'à titre indicatif ; ils ne constituent aucun engagement de notre part.", { size: 20 })),
+          new Paragraph({
+            children: [
+              t("Dans le cas d'un rendez-vous, si l'intervention n'a pas été effectuée en raison d'un empêchement de la part du client, le déplacement sera facturé : ", { size: 20 }),
+              t(`${frais.toFixed(2)} €.`, { bold: true, size: 20 }),
+            ],
+            spacing: { before: 40, after: 40 },
+          }),
+        ], true),
+
+        spacer(),
+
+        // ART 7
+        articleHeader("7", "Rupture du contrat"),
+        contentRow([
+          p(t("Pour tout manquement des obligations par l'une des parties, l'autre partie pourra invoquer son droit de résiliation du contrat à tacite reconduction dans le cas où la mise en demeure persiste au-delà d'un mois.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 8
+        articleHeader("8", "Loi applicable"),
+        contentRow([
+          p(t("Le présent contrat est soumis aux lois françaises. En l'absence de la bonne exécution du contrat, ce dernier sera soumis par les tribunaux compétents de Fort-de-France, soumis au droit français.", { size: 20 })),
+        ], true),
+
+        spacer(),
+
+        // ART 9
+        articleHeader("9", "Modifications du contrat"),
+        contentRow([
+          p(t("Chaque modification du contrat fera l'objet d'une signature entre chaque Partie ou leurs représentants autorisés.", { size: 20 })),
+        ]),
+
+        spacer(), spacer(),
+
+        // Fait à
+        p(t(`Fait le ${dateFr} en deux exemplaires à Fort-de-France`, { bold: true, size: 22 }), { align: AlignmentType.CENTER, before: 120, after: 120 }),
+
+        // Signatures
+        sigTable,
+
+        spacer(),
+
+        // Paraphez
+        p(t("Paraphez chaque page du contrat", { italic: true, size: 18, color: GRAY }), { align: AlignmentType.CENTER }),
+      ],
+    }],
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `contrat-${c.ref}-${(c.clientNom||"client").replace(/\s+/g,"-")}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 
