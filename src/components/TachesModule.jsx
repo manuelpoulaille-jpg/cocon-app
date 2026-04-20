@@ -111,14 +111,21 @@ export default function TachesModule() {
   const addTache = async () => {
     if (!form.titre.trim()) return;
     setSaving(true);
-    await addDoc(collection(db, "taches"), {
-      ...form,
-      statut:    "à faire",
-      createdAt: Timestamp.now(),
-    });
-    setForm({ ...EMPTY_FORM });
-    await fetchTaches();
-    setSaving(false);
+    try {
+      const ref = await addDoc(collection(db, "taches"), {
+        ...form,
+        statut:    "à faire",
+        createdAt: Timestamp.now(),
+      });
+      console.log("Tâche créée :", ref.id);
+      setForm({ ...EMPTY_FORM });
+      await fetchTaches();
+    } catch(e) {
+      console.error("Erreur addTache:", e);
+      alert("Erreur enregistrement tâche :\n" + (e?.message || e?.code || JSON.stringify(e)));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleDone = async (t) => {
