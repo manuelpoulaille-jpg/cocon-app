@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection, getDocs, addDoc, updateDoc, doc, Timestamp,
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp,
 } from "firebase/firestore";
 import logoBase64 from "../logoBase64";
 
@@ -540,7 +540,8 @@ export default function ContratModule() {
   const [saving,   setSaving]   = useState(false);
 
   // Passages
-  const [newPassage, setNewPassage] = useState("");
+  const [newPassage,      setNewPassage]      = useState("");
+  const [confirmDelete,   setConfirmDelete]   = useState(false);
 
   // Relances
   const [newRelanceDate, setNewRelanceDate] = useState("");
@@ -674,6 +675,15 @@ export default function ContratModule() {
     setView("list");
   };
 
+  const deleteContrat = async () => {
+    if (!selected) return;
+    await deleteDoc(doc(db, "contrats", selected.id));
+    setConfirmDelete(false);
+    setSelected(null);
+    setView("list");
+    await fetchContrats();
+  };
+
   // ── VUE FORMULAIRE ────────────────────────────────────────────────────────
 
   if (view === "form") {
@@ -782,10 +792,20 @@ export default function ContratModule() {
 
     return (
       <div className="container">
+        {confirmDelete && (
+          <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:"1rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Supprimer définitivement ce contrat ?</span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn-outline" onClick={()=>setConfirmDelete(false)}>Annuler</button>
+              <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteContrat}>Supprimer</button>
+            </div>
+          </div>
+        )}
         <div className="page-header">
-          <button className="btn-back" onClick={() => setView("list")}>← Retour</button>
+          <button className="btn-back" onClick={() => { setView("list"); setConfirmDelete(false); }}>← Retour</button>
           <h2>{selected.ref}</h2>
           <span className="badge" style={{ background:sStyle.bg, color:sStyle.color }}>{sc}</span>
+          <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
 
         {/* Client */}
