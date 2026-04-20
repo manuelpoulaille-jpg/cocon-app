@@ -7,6 +7,7 @@ import {
 import logoBase64 from "../logoBase64";
 import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
+import TachesModule from "./TachesModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -98,15 +99,33 @@ export default function AdminDashboard({ user, onLogout }) {
   const [driveSending,setDriveSending]=useState(false);
   const [period,setPeriod]=useState("jour");
   const [form,setForm]=useState({...EMPTY_FORM});
+  const [taches,setTaches]=useState([]);
+  const [contrats,setContrats]=useState([]);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
     const id="ca-scoped-styles";
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
-  useEffect(()=>{fetchBons();},[]);
+  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
+  const fetchTachesHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "taches"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setTaches(all);
+    } catch(e) {}
+  };
+
+  const fetchContratsHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "contrats"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setContrats(all);
+    } catch(e) {}
+  };
+
   const refNum=()=>"INT-"+Date.now().toString().slice(-6);
   const flashMsg=(t)=>{setMsg(t);setTimeout(()=>setMsg(""),4000);};
 
@@ -267,6 +286,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const renderContent=()=>{
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
+    if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -392,36 +412,194 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
     );
 
-    // DASHBOARD
+    // ACCUEIL 360°
     const bonsDuJour=bons.filter(b=>b.datePrevue===today).sort((a,b)=>(a.heurePrevue||"").localeCompare(b.heurePrevue||""));
-    const now=new Date(),day=now.getDay(),diff=day===0?-6:1-day;
-    const mon=new Date(now);mon.setDate(now.getDate()+diff);mon.setHours(0,0,0,0);
-    const sat=new Date(mon);sat.setDate(mon.getDate()+5);sat.setHours(23,59,59,999);
-    const bonsSemaine=bons.filter(b=>{if(b.datePrevue===today)return false;const d=new Date(b.datePrevue+"T00:00:00");return d>=mon&&d<=sat;}).sort((a,b)=>a.datePrevue.localeCompare(b.datePrevue)||(a.heurePrevue||"").localeCompare(b.heurePrevue||""));
+    const now2=new Date(),day2=now2.getDay(),diff2=day2===0?-6:1-day2;
+    const mon2=new Date(now2);mon2.setDate(now2.getDate()+diff2);mon2.setHours(0,0,0,0);
+    const sat2=new Date(mon2);sat2.setDate(mon2.getDate()+5);sat2.setHours(23,59,59,999);
+
+    // Stats taches
+    const tachesAfaire   = taches.filter(t=>t.statut!=="faite").length;
+    const tachesRetard   = taches.filter(t=>t.statut!=="faite"&&t.echeance&&t.echeance<today).length;
+    const tachesJour     = taches.filter(t=>t.statut!=="faite"&&t.echeance===today).length;
+    const tachesTotRetard= tachesRetard + tachesJour;
+
+    // Stats contrats
+    const ALERT_JOURS = 20;
+    const contratsActifs     = contrats.filter(c=>{const d=new Date(c.dateFin+"T00:00:00")-new Date();return d>0 && c.statut!=="résilié";}).length;
+    const contratsARenouveler= contrats.filter(c=>{if(c.statut==="résilié") return false;const d=Math.ceil((new Date(c.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));return d>=0&&d<=ALERT_JOURS;}).length;
+    const caRecurrent        = contrats.filter(c=>c.statut!=="résilié"&&c.statut!=="expiré").reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+
+    // Stats bons mois
+    const moisDebut=new Date(now2.getFullYear(),now2.getMonth(),1).toLocaleDateString("fr-CA");
+    const bonsMois    = bons.filter(b=>b.datePrevue>=moisDebut);
+    const caFacture   = bonsMois.filter(b=>b.statut==="terminé").reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0);
+    const bonsMoisN   = bonsMois.length;
+    const terminesMois= bonsMois.filter(b=>b.statut==="terminé").length;
+    const taux        = bonsMoisN>0?Math.round(terminesMois/bonsMoisN*100):0;
+
+    // Contrats alertes
+    const contratsAlertes = contrats
+      .filter(c=>{if(c.statut==="résilié") return false;const d=Math.ceil((new Date((c.dateFin||"")+"T00:00:00")-new Date())/(1000*60*60*24));return d>=0&&d<=ALERT_JOURS;})
+      .sort((a,b)=>{
+        const da=Math.ceil((new Date(a.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
+        const db2=Math.ceil((new Date(b.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
+        return da-db2;
+      }).slice(0,3);
+
+    // Taches urgentes du jour
+    const tachesUrgentes = taches
+      .filter(t=>t.statut!=="faite"&&(t.echeance===today||t.echeance<today))
+      .sort((a,b)=>a.echeance?.localeCompare(b.echeance||""))
+      .slice(0,4);
+
     return(
       <div className="ca-content">
-        <div className="ca-kpi-row">
-          {[{label:"Planifiés",val:stats.planifie,accent:"#d4f0ea",key:"planifié"},{label:"En cours",val:stats.enCours,accent:"#e8c9b8",key:"en cours"},{label:"Terminés",val:stats.termine,accent:"#35B499",key:"terminé"},{label:"Aujourd'hui",val:stats.aujourdhui,accent:"#8B6A4E",key:"aujourdhui"},{label:"Cette semaine",val:stats.semaine,accent:"#2a9a82",key:"semaine"}].map(({label,val,accent,key})=>(
-            <div key={key} className="ca-kpi" onClick={()=>{setFilter(f=>f===key?"":key);setView("list");}}>
+
+        {/* SECTION 1 : ACTIVITÉ COMMERCIALE */}
+        <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Activité commerciale</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+          {[
+            {label:"CA facturé (mois)",      val:caFacture>0?caFacture.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—", accent:"#35B499", sub:`${terminesMois} interv. terminées`},
+            {label:"Interventions (mois)",   val:bonsMoisN,    accent:"#2a9a82",  sub:`${stats.planifie} planifiées · ${stats.enCours} en cours`},
+            {label:"CA récurrent contrats",  val:caRecurrent>0?Math.round(caRecurrent).toLocaleString("fr-FR")+" €":"—", accent:"#8B6A4E", sub:"contrats actifs · TTC/an"},
+            {label:"Taux de complétion",     val:taux+" %",    accent:"#b4b2a9",  sub:"bons terminés / créés"},
+          ].map(({label,val,accent,sub})=>(
+            <div key={label} className="ca-kpi">
               <div className="ca-kpi-accent" style={{background:accent}}/>
               <p className="ca-kpi-label">{label}</p>
               <p className="ca-kpi-val">{val}</p>
+              <p style={{fontSize:"9.5px",color:"#888",marginTop:4}}>{sub}</p>
             </div>
           ))}
         </div>
-        <div className="ca-actions">
-          <button className="ca-btn teal" onClick={()=>setView("new")}>+ Nouveau bon</button>
-          <button className="ca-btn outline" onClick={()=>setView("list")}>Tous les bons</button>
-          <button className="ca-btn drive" onClick={sendBonsToDrive} disabled={driveSending}>{driveSending?"Envoi…":"📤 Envoyer vers Drive"}</button>
+
+        {/* SECTION 2 : OPÉRATIONS & ALERTES */}
+        <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Opérations &amp; alertes</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+          {[
+            {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
+            {label:"Contrats actifs",       val:contratsActifs,   accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
+            {label:"Contrats à renouveler", val:contratsARenouveler, accent:"#8B6A4E", sub:"≤ 20 jours", onClick:()=>setView("contrats")},
+            {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
+            {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence", onClick:()=>setView("taches")},
+          ].map(({label,val,accent,sub,onClick})=>(
+            <div key={label} className="ca-kpi" onClick={onClick} style={{cursor:"pointer"}}>
+              <div className="ca-kpi-accent" style={{background:accent}}/>
+              <p className="ca-kpi-label">{label}</p>
+              <p className="ca-kpi-val">{val}</p>
+              <p style={{fontSize:"9.5px",color:accent==="c0392b"?"#c0392b":"#888",marginTop:4}}>{sub}</p>
+            </div>
+          ))}
         </div>
-        {driveProgress&&(<div className="ca-drive-progress"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6,fontSize:13,fontWeight:600,color:"#1f7a6e"}}><span>Envoi vers Drive…</span><span>{driveProgress.done}/{driveProgress.total}</span></div><div style={{height:8,background:"#d0ede8",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",borderRadius:99,background:"#2a9d8f",width:(driveProgress.done/driveProgress.total*100)+"%"}}/></div></div>)}
-        <div className="ca-panel"><div className="ca-panel-head"><span className="ca-panel-title">Bons du jour</span><span className="ca-panel-count">{bonsDuJour.length} intervention{bonsDuJour.length!==1?"s":""}</span></div>{bonsDuJour.length===0?<div className="ca-empty">Aucun bon prévu aujourd'hui.</div>:<BonsTable data={bonsDuJour}/>}</div>
-        <div className="ca-panel"><div className="ca-panel-head"><span className="ca-panel-title">Bons de la semaine</span><span className="ca-panel-count">{bonsSemaine.length} intervention{bonsSemaine.length!==1?"s":""}</span></div>{bonsSemaine.length===0?<div className="ca-empty">Aucun autre bon prévu cette semaine.</div>:<BonsTable data={bonsSemaine} showDate/>}</div>
+
+        {/* SECTION 3 : WIDGETS 3 COLONNES */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
+
+          {/* Bons du jour */}
+          <div className="ca-panel">
+            <div className="ca-panel-head">
+              <span style={{width:7,height:7,borderRadius:"50%",background:"#35B499",display:"inline-block",flexShrink:0}}/>
+              <span className="ca-panel-title">Interventions du jour</span>
+              <span className="ca-panel-count">{bonsDuJour.length} bon{bonsDuJour.length!==1?"s":""}</span>
+            </div>
+            {bonsDuJour.length===0?(
+              <div className="ca-empty">Aucune intervention aujourd'hui.</div>
+            ):(
+              bonsDuJour.slice(0,5).map(b=>{
+                const sc2=b.statut==="terminé"?"terminé":b.statut==="en cours"?"en cours":"planifié";
+                const dotColor=sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#d4f0ea";
+                const dotBorder=sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#35B499";
+                return(
+                  <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",cursor:"pointer"}} onClick={()=>{setSelected(b);setView("detail");}}>
+                    <div style={{width:7,height:7,borderRadius:"50%",background:dotColor,border:`1.5px solid ${dotBorder}`,flexShrink:0}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:500,color:"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.clientSociete||b.clientNom+" "+b.clientPrenom}</div>
+                      <div style={{fontSize:10,color:"#888"}}>{b.type} · {b.heurePrevue}</div>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:sc2==="terminé"?"#35B499":sc2==="en cours"?"#f5e8d8":"#e1f5ee",color:sc2==="terminé"?"white":sc2==="en cours"?"#6b4a31":"#0e6b50",whiteSpace:"nowrap"}}>{b.statut}</span>
+                  </div>
+                );
+              })
+            )}
+            <div style={{padding:"8px 14px",borderTop:bonsDuJour.length>0?".5px solid #f0ede8":"none",display:"flex",justifyContent:"flex-end"}}>
+              <span style={{fontSize:10,color:"#35B499",fontWeight:500,cursor:"pointer"}} onClick={()=>{setFilter("aujourdhui");setView("list");}}>Voir tous →</span>
+            </div>
+          </div>
+
+          {/* Contrats alertes + Carburant */}
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div className="ca-panel" style={{flex:1}}>
+              <div className="ca-panel-head">
+                <span style={{width:7,height:7,borderRadius:"50%",background:"#8B6A4E",display:"inline-block",flexShrink:0}}/>
+                <span className="ca-panel-title">Contrats à surveiller</span>
+                <span className="ca-panel-count">{contratsAlertes.length} alerte{contratsAlertes.length!==1?"s":""}</span>
+              </div>
+              {contratsAlertes.length===0?(
+                <div className="ca-empty">Aucune échéance proche.</div>
+              ):(
+                contratsAlertes.map(c=>{
+                  const dj=Math.ceil((new Date(c.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
+                  return(
+                    <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:dj<=7?"#fff8f4":"transparent",cursor:"pointer"}} onClick={()=>setView("contrats")}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:"#f5e8d8",border:"1.5px solid #8B6A4E",flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{c.clientNom}</div>
+                        <div style={{fontSize:10,color:"#8B6A4E",fontWeight:dj<=7?500:400}}>Expire dans {dj} j · {c.dateFin?c.dateFin.split("-").reverse().join("/"):"—"}</div>
+                      </div>
+                      <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#f5e8d8",color:"#6b4a31",whiteSpace:"nowrap"}}>renouveler</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>setView("carburant")}>
+              <div className="ca-panel-head" style={{borderBottom:"none"}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:"#2a9a82",display:"inline-block",flexShrink:0}}/>
+                <span className="ca-panel-title">Carburant — ce mois</span>
+              </div>
+              <div style={{padding:"0 14px 12px"}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginBottom:6}}>
+                  <span style={{fontSize:18,fontWeight:700,color:"#1a1a1a",letterSpacing:"-0.5px"}}>Voir le module →</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Tâches du jour */}
+          <div className="ca-panel">
+            <div className="ca-panel-head">
+              <span style={{width:7,height:7,borderRadius:"50%",background:"#c0392b",display:"inline-block",flexShrink:0}}/>
+              <span className="ca-panel-title">Tâches du jour</span>
+              <span className="ca-panel-count">{tachesTotRetard} restante{tachesTotRetard!==1?"s":""}</span>
+            </div>
+            {tachesTotRetard===0?(
+              <div className="ca-empty">Tout est à jour 🎉</div>
+            ):(
+              tachesUrgentes.map(t=>(
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:t.echeance<today?"#fff5f5":"transparent"}}>
+                  <div style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${t.echeance<today?"#c0392b":"#35B499"}`,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:500,color:t.echeance<today?"#c0392b":"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titre}</div>
+                    <div style={{fontSize:10,color:t.echeance<today?"#c0392b":"#888",marginTop:1}}>
+                      {t.echeance<today?`En retard · ${t.categorie}`:t.categorie+" · "+t.priorite}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+            <div style={{padding:"8px 14px",borderTop:tachesTotRetard>0?".5px solid #f0ede8":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:10,color:"#888"}}>{tachesAfaire} tâche{tachesAfaire!==1?"s":""} au total</span>
+              <span style={{fontSize:10,color:"#35B499",fontWeight:500,cursor:"pointer"}} onClick={()=>setView("taches")}>Voir toutes →</span>
+            </div>
+          </div>
+
+        </div>
       </div>
     );
   };
 
-  const viewTitle={dashboard:"Tableau de bord",contrats:"Contrats",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -433,6 +611,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>setView("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
+          <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
           <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>setView("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
