@@ -110,6 +110,7 @@ function statutStyle(s) {
 // ── PDF ───────────────────────────────────────────────────────────────────────
 
 async function generatePDF(c) {
+  try {
   const {
     Document, Packer, Paragraph, Table, TableRow, TableCell,
     TextRun, AlignmentType, WidthType, BorderStyle,
@@ -453,6 +454,10 @@ async function generatePDF(c) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  } catch(err) {
+    console.error("Erreur génération contrat:", err);
+    alert("Erreur lors de la génération du contrat.\n\nVérifiez que le package docx est bien installé (npm install docx) et rechargez l'application.\n\nDétail : " + (err?.message || String(err)));
+  }
 }
 
 
