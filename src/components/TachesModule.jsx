@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, Timestamp, orderBy, query,
+  doc, Timestamp,
 } from "firebase/firestore";
 
 const CATEGORIES = ["Rappel client", "Envoi devis", "Relance", "Suivi contrat", "Autre"];
@@ -93,13 +93,19 @@ export default function TachesModule() {
   }, []);
 
   const fetchTaches = async () => {
-    const q = query(collection(db, "taches"), orderBy("createdAt", "desc"));
-    const snap = await getDocs(q);
-    const all = snap.docs.map(d => {
-      const data = { id: d.id, ...d.data() };
-      return { ...data, sc: computeStatut(data) };
-    });
-    setTaches(all);
+    try {
+      const snap = await getDocs(collection(db, "taches"));
+      const all = snap.docs
+        .map(d => { const data = { id: d.id, ...d.data() }; return { ...data, sc: computeStatut(data) }; })
+        .sort((a, b) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return tb - ta;
+        });
+      setTaches(all);
+    } catch(e) {
+      console.error("fetchTaches error:", e);
+    }
   };
 
   const addTache = async () => {
