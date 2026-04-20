@@ -21,7 +21,8 @@ const EMPTY_FORM = {
 };
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
-.ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:10!important}
+.ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
+.ca-sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:190}
 .ca-logo-area{padding:20px 18px 16px!important;border-bottom:0.5px solid rgba(255,255,255,0.07)!important}
 .ca-logo-mark{font-size:22px!important;font-weight:700!important;color:#35B499!important;letter-spacing:-0.5px!important;line-height:1!important;margin:0!important}
 .ca-logo-sub{font-size:9px!important;color:rgba(255,255,255,0.28)!important;letter-spacing:2px!important;text-transform:uppercase!important;margin-top:3px!important}
@@ -38,7 +39,8 @@ const SCOPED_CSS = `
 .ca-user-name{font-size:11px!important;color:rgba(255,255,255,0.65)!important;font-weight:500!important;margin:0!important}
 .ca-user-role{font-size:9px!important;color:rgba(255,255,255,0.3)!important;margin:0!important}
 .ca-main{flex:1!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;min-width:0!important}
-.ca-topbar{height:48px!important;min-height:48px!important;background:white!important;border-bottom:0.5px solid #e0ddd8!important;display:flex!important;align-items:center!important;padding:0 24px!important;gap:0!important;flex-shrink:0!important;box-shadow:none!important}
+.ca-topbar{height:48px!important;min-height:48px!important;background:white!important;border-bottom:0.5px solid #e0ddd8!important;display:flex!important;align-items:center!important;padding:0 16px!important;gap:0!important;flex-shrink:0!important;box-shadow:none!important}
+.ca-hamburger{display:none;background:none;border:none;cursor:pointer;padding:6px;color:#1a1a1a;font-size:20px;margin-right:8px;flex-shrink:0}
 .ca-topbar-title{font-size:14px!important;font-weight:600!important;color:#1a1a1a!important;margin:0!important;flex-shrink:0!important}
 .ca-period-tabs{display:flex!important;gap:2px!important;margin-left:20px!important}
 .ca-period-tab{font-size:12px!important;padding:5px 14px!important;border-radius:20px!important;cursor:pointer!important;color:#888!important;background:transparent!important;border:none!important;box-shadow:none!important;font-weight:400!important}
@@ -48,22 +50,22 @@ const SCOPED_CSS = `
 .ca-btn.teal{background:#35B499!important;color:white!important}
 .ca-btn.outline{background:transparent!important;border:0.5px solid #ccc!important;color:#333!important}
 .ca-btn.drive{background:#e8f5f3!important;color:#1f7a6e!important;border:0.5px solid #2a9d8f!important}
-.ca-content{flex:1!important;overflow-y:auto!important;padding:22px 24px!important}
-.ca-kpi-row{display:grid!important;grid-template-columns:repeat(5,1fr)!important;gap:12px!important;margin-bottom:20px!important}
-.ca-kpi{background:white!important;border-radius:10px!important;padding:14px 16px!important;border:0.5px solid #e0ddd8!important;position:relative!important;overflow:hidden!important;cursor:pointer!important;transition:box-shadow .15s!important}
+.ca-content{flex:1!important;overflow-y:auto!important;padding:20px 20px!important}
+.ca-kpi-row{display:grid!important;gap:10px!important}
+.ca-kpi{background:white!important;border-radius:10px!important;padding:13px 15px!important;border:0.5px solid #e0ddd8!important;position:relative!important;overflow:hidden!important;cursor:pointer!important}
 .ca-kpi:hover{box-shadow:0 2px 12px rgba(0,0,0,0.07)!important}
 .ca-kpi-accent{position:absolute!important;top:0!important;left:0!important;right:0!important;height:3px!important}
-.ca-kpi-label{font-size:10px!important;color:#888!important;text-transform:uppercase!important;letter-spacing:1px!important;margin:0 0 6px!important;font-weight:500!important}
-.ca-kpi-val{font-size:28px!important;font-weight:700!important;color:#1a1a1a!important;letter-spacing:-1px!important;margin:0!important;line-height:1!important}
-.ca-actions{display:flex!important;gap:10px!important;margin-bottom:20px!important;flex-wrap:wrap!important}
+.ca-kpi-label{font-size:9.5px!important;color:#888!important;text-transform:uppercase!important;letter-spacing:0.8px!important;margin:0 0 6px!important;font-weight:500!important}
+.ca-kpi-val{font-size:22px!important;font-weight:700!important;color:#1a1a1a!important;letter-spacing:-0.5px!important;margin:0!important;line-height:1.1!important}
+.ca-actions{display:flex!important;gap:8px!important;margin-bottom:16px!important;flex-wrap:wrap!important}
 .ca-panel{background:white!important;border-radius:10px!important;border:0.5px solid #e0ddd8!important;overflow:hidden!important;margin-bottom:14px!important}
-.ca-panel-head{padding:12px 16px!important;border-bottom:0.5px solid #e8e5e0!important;display:flex!important;align-items:center!important;gap:8px!important}
+.ca-panel-head{padding:11px 14px!important;border-bottom:0.5px solid #e8e5e0!important;display:flex!important;align-items:center!important;gap:8px!important;flex-wrap:wrap!important}
 .ca-panel-title{font-size:12px!important;font-weight:600!important;color:#1a1a1a!important;margin:0!important}
 .ca-panel-count{font-size:11px!important;color:#888!important;margin-left:auto!important}
-.ca-table-wrap{overflow-x:auto!important}
-.ca-table{width:100%!important;border-collapse:collapse!important;font-size:12px!important}
-.ca-table th{text-align:left!important;font-size:9.5px!important;font-weight:500!important;color:#888!important;text-transform:uppercase!important;letter-spacing:0.8px!important;padding:8px 14px!important;border-bottom:0.5px solid #e8e5e0!important;white-space:nowrap!important;background:white!important}
-.ca-table td{padding:9px 14px!important;border-bottom:0.5px solid #f0ede8!important;color:#1a1a1a!important;vertical-align:middle!important}
+.ca-table-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+.ca-table{width:100%!important;border-collapse:collapse!important;font-size:12px!important;min-width:600px!important}
+.ca-table th{text-align:left!important;font-size:9.5px!important;font-weight:500!important;color:#888!important;text-transform:uppercase!important;letter-spacing:0.8px!important;padding:8px 12px!important;border-bottom:0.5px solid #e8e5e0!important;white-space:nowrap!important;background:white!important}
+.ca-table td{padding:9px 12px!important;border-bottom:0.5px solid #f0ede8!important;color:#1a1a1a!important;vertical-align:middle!important}
 .ca-table tr:last-child td{border-bottom:none!important}
 .ca-table tr:hover td{background:#fafaf8!important;cursor:pointer!important}
 .ca-ref{font-size:11px!important;color:#35B499!important;font-weight:600!important}
@@ -74,9 +76,35 @@ const SCOPED_CSS = `
 .ca-btn-pdf{font-size:10px!important;padding:4px 10px!important;border-radius:6px!important;cursor:pointer!important;background:#e1f5ee!important;color:#0e6b50!important;border:0.5px solid #a0dece!important;font-weight:500!important;margin-right:4px!important}
 .ca-btn-wa{font-size:10px!important;padding:4px 10px!important;border-radius:6px!important;cursor:pointer!important;background:#e8f9ee!important;color:#1a7a45!important;border:0.5px solid #a0d8b0!important;font-weight:500!important}
 .ca-empty{padding:20px 14px!important;font-size:13px!important;color:#aaa!important;text-align:center!important}
-.ca-msg{background:#e8f5f3!important;color:#1a7a65!important;padding:10px 24px!important;font-size:13px!important;font-weight:500!important;border-bottom:0.5px solid #b2ddd5!important}
-.ca-form-zone{padding:24px 28px!important;overflow-y:auto!important;flex:1!important}
+.ca-msg{background:#e8f5f3!important;color:#1a7a65!important;padding:10px 16px!important;font-size:13px!important;font-weight:500!important;border-bottom:0.5px solid #b2ddd5!important}
+.ca-form-zone{padding:16px!important;overflow-y:auto!important;flex:1!important}
 .ca-drive-progress{margin-bottom:16px!important;padding:12px 16px!important;background:#e8f5f3!important;border-radius:10px!important;border:1px solid #2a9d8f!important}
+
+/* ── RESPONSIVE TABLETTE (≤900px) ── */
+@media (max-width:900px){
+  .ca-sidebar{position:fixed!important;left:0!important;top:0!important;bottom:0!important;transform:translateX(-100%)!important;z-index:200!important}
+  .ca-sidebar.open{transform:translateX(0)!important}
+  .ca-sidebar-overlay.open{display:block!important}
+  .ca-hamburger{display:flex!important;align-items:center!important;justify-content:center!important}
+  .ca-period-tabs{display:none!important}
+  .ca-topbar-title{font-size:13px!important}
+  .ca-content{padding:14px!important}
+  .ca-kpi-row{grid-template-columns:repeat(2,1fr)!important}
+  .ca-actions .ca-btn.drive{display:none!important}
+  .ca-form-zone{padding:12px!important}
+}
+
+/* ── RESPONSIVE MOBILE (≤600px) ── */
+@media (max-width:600px){
+  .ca-content{padding:10px!important}
+  .ca-kpi-row{grid-template-columns:repeat(2,1fr)!important}
+  .ca-kpi-val{font-size:18px!important}
+  .ca-topbar{padding:0 10px!important;height:44px!important}
+  .ca-actions{gap:6px!important}
+  .ca-btn{font-size:10px!important;padding:6px 10px!important}
+  .ca-panel-head{padding:9px 12px!important}
+  .ca-form-zone{padding:10px!important}
+}
 `;
 
 const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="terminé"?"termine":"";
@@ -101,6 +129,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [form,setForm]=useState({...EMPTY_FORM});
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
+  const [sidebarOpen,setSidebarOpen]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
@@ -283,6 +312,8 @@ export default function AdminDashboard({ user, onLogout }) {
 
   const isInterventionView=["list","new","detail"].includes(view);
 
+  const navigate=(v)=>{ setView(v); setSidebarOpen(false); };
+
   const renderContent=()=>{
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
@@ -291,7 +322,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="new") return(
       <div className="ca-form-zone">
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-          <button onClick={()=>setView("dashboard")} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
+          <button onClick={()=>navigate("dashboard")} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>Nouveau bon d'intervention</h2>
         </div>
         <form onSubmit={createBon}>
@@ -541,7 +572,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 contratsAlertes.map(c=>{
                   const dj=Math.ceil((new Date(c.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
                   return(
-                    <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:dj<=7?"#fff8f4":"transparent",cursor:"pointer"}} onClick={()=>setView("contrats")}>
+                    <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:dj<=7?"#fff8f4":"transparent",cursor:"pointer"}} onClick={()=>navigate("contrats")}>
                       <div style={{width:7,height:7,borderRadius:"50%",background:"#f5e8d8",border:"1.5px solid #8B6A4E",flexShrink:0}}/>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{c.clientNom}</div>
@@ -553,7 +584,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 })
               )}
             </div>
-            <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>setView("carburant")}>
+            <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>navigate("carburant")}>
               <div className="ca-panel-head" style={{borderBottom:"none"}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:"#2a9a82",display:"inline-block",flexShrink:0}}/>
                 <span className="ca-panel-title">Carburant — ce mois</span>
@@ -590,7 +621,7 @@ export default function AdminDashboard({ user, onLogout }) {
             )}
             <div style={{padding:"8px 14px",borderTop:tachesTotRetard>0?".5px solid #f0ede8":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span style={{fontSize:10,color:"#888"}}>{tachesAfaire} tâche{tachesAfaire!==1?"s":""} au total</span>
-              <span style={{fontSize:10,color:"#35B499",fontWeight:500,cursor:"pointer"}} onClick={()=>setView("taches")}>Voir toutes →</span>
+              <span style={{fontSize:10,color:"#35B499",fontWeight:500,cursor:"pointer"}} onClick={()=>navigate("taches")}>Voir toutes →</span>
             </div>
           </div>
 
@@ -603,23 +634,25 @@ export default function AdminDashboard({ user, onLogout }) {
 
   return(
     <div className="ca-root">
-      <div className="ca-sidebar">
+      <div className={`ca-sidebar${sidebarOpen?" open":""}`}>
         <div className="ca-logo-area"><p className="ca-logo-mark">Cocon+</p><p className="ca-logo-sub">Administration</p></div>
         <div className="ca-nav">
           <div className="ca-nav-sec">Pilotage</div>
           <button className={`ca-nav-item${view==="dashboard"?" active":""}`} onClick={()=>setView("dashboard")}>{view==="dashboard"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Tableau de bord</button>
-          <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>setView("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
+          <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>navigate("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
-          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>setView("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
+          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
         {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
       </div>
+      {sidebarOpen && <div className="ca-sidebar-overlay open" onClick={()=>setSidebarOpen(false)}/>}
       <div className="ca-main">
         <div className="ca-topbar">
+          <button className="ca-hamburger" onClick={()=>setSidebarOpen(o=>!o)}>☰</button>
           <span className="ca-topbar-title">{viewTitle}</span>
           {view==="dashboard"&&<div className="ca-period-tabs">{[["jour","Aujourd'hui"],["semaine","7 jours"],["mois","Ce mois"]].map(([k,l])=><button key={k} className={`ca-period-tab${period===k?" active":""}`} onClick={()=>setPeriod(k)}>{l}</button>)}</div>}
           <div className="ca-topbar-actions">

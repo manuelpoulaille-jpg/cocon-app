@@ -62,6 +62,7 @@ function echeanceLabel(dateStr) {
 
 const CSS = `
 .tk-root{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+@media(max-width:700px){.tk-table{min-width:500px}}
 .tk-table{width:100%;border-collapse:collapse;font-size:12px}
 .tk-table th{text-align:left;font-size:9px;font-weight:500;color:#888;text-transform:uppercase;letter-spacing:.8px;padding:7px 14px;border-bottom:.5px solid #e8e5e0;white-space:nowrap;background:white}
 .tk-table td{padding:9px 14px;border-bottom:.5px solid #f0ede8;color:#1a1a1a;vertical-align:middle}
@@ -170,7 +171,7 @@ export default function TachesModule() {
     <div style={{ padding: "22px 24px" }} className="tk-root">
 
       {/* KPIs */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:16 }}>
         {[
           { label:"À faire",         val:aFaire,      accent:"#35B499",  sub: today_n > 0 ? `dont ${today_n} aujourd'hui` : "aucune aujourd'hui",     subColor: today_n > 0 ? "#8B6A4E" : "#888" },
           { label:"En retard",       val:enRetard,    accent:"#c0392b",  sub: enRetard > 0 ? "Action requise" : "Aucun retard",   subColor: enRetard > 0 ? "#c0392b" : "#888" },
@@ -186,10 +187,10 @@ export default function TachesModule() {
         ))}
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 280px", gap:14 }}>
+      <div style={{ display:"flex", flexWrap:"wrap-reverse", gap:14, alignItems:"flex-start" }}>
 
         {/* TABLEAU */}
-        <div>
+        <div style={{flex:"1 1 500px",minWidth:0}}>
           {/* Filtres */}
           <div style={{ display:"flex", gap:7, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
             {[
@@ -299,7 +300,7 @@ export default function TachesModule() {
         </div>
 
         {/* FORMULAIRE + TÂCHES DU JOUR */}
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:12, flex:"1 1 280px", minWidth:"260px" }}>
 
           {/* Tâches du jour */}
           <div className="tk-panel">

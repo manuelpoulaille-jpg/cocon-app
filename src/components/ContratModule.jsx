@@ -542,6 +542,7 @@ export default function ContratModule() {
   // Passages
   const [newPassage,      setNewPassage]      = useState("");
   const [confirmDelete,   setConfirmDelete]   = useState(false);
+  const [confirmResilier, setConfirmResilier] = useState(false);
 
   // Relances
   const [newRelanceDate, setNewRelanceDate] = useState("");
@@ -682,6 +683,14 @@ export default function ContratModule() {
     setSelected(null);
     setView("list");
     await fetchContrats();
+  };
+
+  const resilierContrat = async () => {
+    if (!selected) return;
+    await updateDoc(doc(db, "contrats", selected.id), { statut: "résilié" });
+    const refreshed = { ...selected, statut: "résilié", sc: "résilié" };
+    setSelected(refreshed);
+    await fetchContrats(refreshed);
   };
 
   // ── VUE FORMULAIRE ────────────────────────────────────────────────────────
@@ -917,10 +926,10 @@ export default function ContratModule() {
             </div>
           ))}
           {sc!=="résilié" && (
-            <div style={{display:"flex",gap:8,marginTop:14,alignItems:"center"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:14}}>
               <input type="date" value={newPassage} onChange={e=>setNewPassage(e.target.value)}
-                style={{flex:1,padding:"8px 10px",fontSize:13,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}/>
-              <button className="btn-primary" onClick={addPassage} disabled={!newPassage}>+ Ajouter</button>
+                style={{width:"100%",padding:"10px",fontSize:14,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
+              <button className="btn-primary" style={{width:"100%"}} onClick={addPassage} disabled={!newPassage}>+ Ajouter le passage</button>
             </div>
           )}
         </div>
@@ -946,9 +955,9 @@ export default function ContratModule() {
           ))}
           {sc!=="résilié" && (
             <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div>
                 <input type="date" value={newRelanceDate} onChange={e=>setNewRelanceDate(e.target.value)}
-                  style={{flex:1,padding:"8px 10px",fontSize:13,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}/>
+                  style={{width:"100%",padding:"10px",fontSize:14,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
               </div>
               <input type="text" placeholder="Note (optionnel) — ex: Contact par téléphone, RDV pris pour le 12/05" value={newRelanceNote} onChange={e=>setNewRelanceNote(e.target.value)}
                 style={{width:"100%",padding:"8px 10px",fontSize:13,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
@@ -968,9 +977,24 @@ export default function ContratModule() {
         )}
 
         {/* Actions */}
+        {confirmResilier && (
+          <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la résiliation du contrat ?</span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn-outline" onClick={()=>setConfirmResilier(false)}>Annuler</button>
+              <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={()=>{resilierContrat();setConfirmResilier(false);}}>Résilier</button>
+            </div>
+          </div>
+        )}
         <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:8,marginBottom:12}}>
           <button className="btn-primary" style={{flex:1}} onClick={()=>generatePDF(selected)}>📄 Télécharger PDF</button>
           <button className="btn-outline" onClick={()=>{setForm({...selected});setIsEdit(true);setView("form");}}>Modifier</button>
+          {sc !== "résilié" && (
+            <button onClick={()=>setConfirmResilier(true)}
+              style={{background:"transparent",border:"0.5px solid #f5c6cb",color:"#c0392b",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:500}}>
+              Résilier
+            </button>
+          )}
         </div>
         {(sc==="à renouveler"||sc==="expiré") && (
           <button className="btn-finish" style={{width:"100%",marginBottom:28}} disabled={saving} onClick={()=>renouveler(selected)}>
@@ -1021,7 +1045,7 @@ export default function ContratModule() {
   // CSS tableau injecté (cohérence avec AdminDashboard)
   const TABLE_CSS = `
     .ctr-table-wrap{overflow-x:auto}
-    .ctr-table{width:100%;border-collapse:collapse;font-size:12px}
+    .ctr-table{width:100%;border-collapse:collapse;font-size:12px;min-width:700px}
     .ctr-table th{text-align:left;font-size:9.5px;font-weight:500;color:#888;text-transform:uppercase;letter-spacing:.8px;padding:8px 14px;border-bottom:.5px solid #e8e5e0;white-space:nowrap;background:white}
     .ctr-table td{padding:10px 14px;border-bottom:.5px solid #f0ede8;color:var(--color-text-primary);vertical-align:middle}
     .ctr-table tr:last-child td{border-bottom:none}
@@ -1045,6 +1069,7 @@ export default function ContratModule() {
     .ctr-panel-head{padding:12px 16px;border-bottom:.5px solid #e8e5e0;display:flex;align-items:center;gap:8px}
     .ctr-panel-title{font-size:12px;font-weight:600;color:#1a1a1a;margin:0}
     .ctr-panel-count{font-size:11px;color:#888;margin-left:auto}
+    @media(max-width:768px){.ctr-kpi-row{grid-template-columns:repeat(2,1fr)!important}.ctr-kpi-val{font-size:20px}}
   `;
 
   const badgeClass = (sc) => ({
@@ -1055,7 +1080,7 @@ export default function ContratModule() {
     <div style={{padding:"22px 24px"}}>
 
       {/* KPI */}
-      <div className="ctr-kpi-row">
+      <div className="ctr-kpi-row" style={{gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))'}}>
         <div className="ctr-kpi" onClick={()=>setFilter("actif")}>
           <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
           <p className="ctr-kpi-label">Contrats actifs</p>
