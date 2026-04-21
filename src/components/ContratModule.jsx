@@ -56,6 +56,13 @@ function getDaysTo(dateStr) {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+// Compte les passages dans la période dateDebut -> dateFin
+function passagesPeriode(c) {
+  if (!c.dateDebut || !c.dateFin) return { realises: (c.passages||[]).length, attendus: parseInt(c.nbPassages)||4 };
+  const passages = (c.passages || []).filter(p => p.date >= c.dateDebut && p.date <= c.dateFin);
+  return { realises: passages.length, attendus: parseInt(c.nbPassages) || 4 };
+}
+
 // Calcule la date approximative du prochain passage
 function nextPassageDate(c) {
   const nb = parseInt(c.nbPassages) || 4;
@@ -766,7 +773,8 @@ export default function ContratModule() {
     // dateFin : info seulement, pas d'alerte
     const sStyle    = statutStyle(sc);
     const annuel    = selected.montantTTC && selected.nbPassages ? (parseFloat(selected.montantTTC) * parseInt(selected.nbPassages)).toFixed(2) : "—";
-    const pct       = selected.nbPassages ? Math.min(100, Math.round(((selected.passages||[]).length / selected.nbPassages) * 100)) : 0;
+    const { realises: pasRealises, attendus: pasAttendus } = passagesPeriode(selected);
+    const pct = Math.min(100, Math.round((pasRealises / pasAttendus) * 100));
     const intervalMois = Math.round(12 / (parseInt(selected.nbPassages) || 4));
     const nextDate  = nextPassageDate(selected);
     const daysToNext = getDaysTo(nextDate);
@@ -871,8 +879,12 @@ export default function ContratModule() {
           <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:6}}>
             <div style={{height:4,background:"#35B499",borderRadius:2,width:pct+"%",transition:"width .3s"}}/>
           </div>
-          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:14}}>
-            {(selected.passages||[]).length} / {selected.nbPassages} passages réalisés
+          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>
+            <b style={{color:pasRealises>=pasAttendus?"#35B499":"var(--color-text-primary)"}}>{pasRealises} / {pasAttendus}</b> passages réalisés sur la période en cours
+          </p>
+          <p style={{fontSize:11,color:"#888",marginBottom:14,fontStyle:"italic"}}>
+            {selected.dateDebut?fmtDate(selected.dateDebut):"—"} → {selected.dateFin?fmtDate(selected.dateFin):"—"}
+            {" · "}{(selected.passages||[]).length} passage{(selected.passages||[]).length>1?"s":""} au total depuis le début
           </p>
           {(selected.passages||[]).length===0 && (
             <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12,fontStyle:"italic"}}>Aucun passage enregistré.</p>
@@ -1112,7 +1124,8 @@ export default function ContratModule() {
 
                   const alert       = daysNext!==null&&(daysNext<0||(daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré"));
                   const annuel      = c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
-                  const pct         = c.nbPassages?Math.min(100,Math.round(((c.passages||[]).length/c.nbPassages)*100)):0;
+                  const { realises: pRealises, attendus: pAttendus } = passagesPeriode(c);
+                  const pct = Math.min(100, Math.round((pRealises / pAttendus) * 100));
                   const lastRelance = (c.relances||[]).length>0?[...(c.relances||[])].sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
                   const sStyle      = statutStyle(c.sc);
                   return(
@@ -1128,7 +1141,7 @@ export default function ContratModule() {
                       <td>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
                           <div className="ctr-prog"><div className="ctr-prog-fill" style={{width:pct+"%"}}/></div>
-                          <span style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{(c.passages||[]).length}/{c.nbPassages}</span>
+                          <span style={{fontSize:11,color:pRealises>=pAttendus?"#35B499":"#888",whiteSpace:"nowrap",fontWeight:pRealises>=pAttendus?500:400}}>{pRealises}/{pAttendus}</span>
                         </div>
                       </td>
                       <td style={{fontWeight:500,color:"#35B499",whiteSpace:"nowrap"}}>
