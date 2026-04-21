@@ -456,10 +456,10 @@ export default function AdminDashboard({ user, onLogout }) {
     const tachesTotRetard= tachesRetard + tachesJour;
 
     // Stats contrats
-    const ALERT_JOURS = 20;
-    const contratsActifs     = contrats.filter(c=>{const d=new Date(c.dateFin+"T00:00:00")-new Date();return d>0 && c.statut!=="résilié";}).length;
-    const contratsARenouveler= contrats.filter(c=>{if(c.statut==="résilié") return false;const d=Math.ceil((new Date(c.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));return d>=0&&d<=ALERT_JOURS;}).length;
-    const caRecurrent        = contrats.filter(c=>c.statut!=="résilié"&&c.statut!=="expiré").reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+    const contratsActifs = contrats.filter(c=>c.statut==="actif").length;
+
+    const caRecurrent = contrats.filter(c=>c.statut==="actif").reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+    const aRelancerContrats = contrats.filter(c=>{if(c.sc==="résilié") return false;const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();const base=passages.length>0?passages[passages.length-1]:c.dateDebut;if(!base)return false;const nb=parseInt(c.nbPassages)||4;const intDays=Math.round(365/nb);const next=new Date(base+"T00:00:00");next.setDate(next.getDate()+intDays);const diff=Math.ceil((next-new Date())/(1000*60*60*24));return diff<=15;}).length;
 
     // Stats bons mois
     const moisDebut=new Date(now2.getFullYear(),now2.getMonth(),1).toLocaleDateString("fr-CA");
@@ -470,13 +470,19 @@ export default function AdminDashboard({ user, onLogout }) {
     const taux        = bonsMoisN>0?Math.round(terminesMois/bonsMoisN*100):0;
 
     // Contrats alertes
-    const contratsAlertes = contrats
-      .filter(c=>{if(c.statut==="résilié") return false;const d=Math.ceil((new Date((c.dateFin||"")+"T00:00:00")-new Date())/(1000*60*60*24));return d>=0&&d<=ALERT_JOURS;})
-      .sort((a,b)=>{
-        const da=Math.ceil((new Date(a.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
-        const db2=Math.ceil((new Date(b.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
-        return da-db2;
-      }).slice(0,3);
+    // Contrats dont le prochain passage est dans <= 15 jours ou en retard
+    const contratsAlertes = contrats.filter(c=>{
+      if(c.statut==="résilié") return false;
+      const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();
+      const base=passages.length>0?passages[passages.length-1]:c.dateDebut;
+      if(!base) return false;
+      const nb=parseInt(c.nbPassages)||4;
+      const intDays=Math.round(365/nb);
+      const next=new Date(base+"T00:00:00");
+      next.setDate(next.getDate()+intDays);
+      const diff=Math.ceil((next-new Date())/(1000*60*60*24));
+      return diff<=15;
+    }).slice(0,3);
 
     // Taches urgentes du jour
     const tachesUrgentes = taches
@@ -510,8 +516,8 @@ export default function AdminDashboard({ user, onLogout }) {
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
           {[
             {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
-            {label:"Contrats actifs",       val:contratsActifs,   accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
-            {label:"Contrats à renouveler", val:contratsARenouveler, accent:"#8B6A4E", sub:"≤ 20 jours", onClick:()=>setView("contrats")},
+            {label:"Contrats actifs",      val:contratsActifs,      accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
+            {label:"Passages à planifier", val:aRelancerContrats,   accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour", onClick:()=>setView("contrats")},
             {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
             {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence", onClick:()=>setView("taches")},
           ].map(({label,val,accent,sub,onClick})=>(
@@ -576,9 +582,9 @@ export default function AdminDashboard({ user, onLogout }) {
                       <div style={{width:7,height:7,borderRadius:"50%",background:"#f5e8d8",border:"1.5px solid #8B6A4E",flexShrink:0}}/>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{c.clientNom}</div>
-                        <div style={{fontSize:10,color:"#8B6A4E",fontWeight:dj<=7?500:400}}>Expire dans {dj} j · {c.dateFin?c.dateFin.split("-").reverse().join("/"):"—"}</div>
+                        <div style={{fontSize:10,color:"#8B6A4E",fontWeight:500}}>Passage à planifier</div>
                       </div>
-                      <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#f5e8d8",color:"#6b4a31",whiteSpace:"nowrap"}}>renouveler</span>
+                      <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#f5e8d8",color:"#6b4a31",whiteSpace:"nowrap"}}>à planifier</span>
                     </div>
                   );
                 })

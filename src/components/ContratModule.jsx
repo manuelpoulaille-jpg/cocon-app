@@ -7,7 +7,6 @@ import logoBase64 from "../logoBase64";
 
 // ── CONSTANTES ────────────────────────────────────────────────────────────────
 
-const ALERT_DAYS        = 20;  // alerte renouvellement contrat
 const RELANCE_ALERT_DAYS = 15; // alerte prochaine intervention
 
 const COCON_INFO = {
@@ -30,7 +29,7 @@ const EMPTY_FORM = {
   clientTel: "", clientEmail: "", adresseIntervention: "",
   prestations: [], nbPassages: 4, montantHT: "", montantTTC: "",
   fraisDeplacement: 30, preavis: 1,
-  dateSignature: "", dateDebut: "", statut: "actif", notes: "",
+  dateSignature: "", dateDebut: "", dateDebutClient: "", statut: "actif", notes: "",
 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -90,20 +89,14 @@ function fmtDate(str) {
 
 function computeStatut(c) {
   if (c.statut === "résilié" || c.statut === "brouillon") return c.statut;
-  const days = getDaysTo(c.dateFin);
-  if (days === null) return c.statut || "actif";
-  if (days < 0) return "expiré";
-  if (days <= ALERT_DAYS) return "à renouveler";
   return "actif";
 }
 
 function statutStyle(s) {
   return {
-    "actif":        { bg: "#e1f5ee", color: "#0e6b50" },
-    "à renouveler": { bg: "#f5e8d8", color: "#6b4a31" },
-    "expiré":       { bg: "#fde8e8", color: "#9b2c2c" },
-    "résilié":      { bg: "var(--color-background-secondary)", color: "var(--color-text-secondary)" },
-    "brouillon":    { bg: "#f0f0f0", color: "#888" },
+    "actif":     { bg: "#e1f5ee", color: "#0e6b50" },
+    "résilié":   { bg: "var(--color-background-secondary)", color: "var(--color-text-secondary)" },
+    "brouillon": { bg: "#f0f0f0", color: "#888" },
   }[s] || { bg: "#eee", color: "#333" };
 }
 
@@ -569,7 +562,7 @@ export default function ContratModule() {
         return { ...data, sc: computeStatut(data) };
       })
       .sort((a, b) => {
-        const order = { "à renouveler": 0, "expiré": 1, "brouillon": 2, "actif": 3, "résilié": 4 };
+        const order = { "brouillon": 0, "actif": 1, "résilié": 2 };
         return (order[a.sc] ?? 5) - (order[b.sc] ?? 5);
       });
     setContrats(all);
@@ -654,27 +647,7 @@ export default function ContratModule() {
     fetchContrats(refreshed);
   };
 
-  const renouveler = async (c) => {
-    setSaving(true);
-    const payload = {
-      clientNom: c.clientNom, clientResponsable: c.clientResponsable || "",
-      clientAdresse: c.clientAdresse, clientTel: c.clientTel || "",
-      clientEmail: c.clientEmail || "", adresseIntervention: c.adresseIntervention || "",
-      prestations: c.prestations || [], nbPassages: c.nbPassages,
-      montantHT: c.montantHT, montantTTC: c.montantTTC,
-      fraisDeplacement: c.fraisDeplacement, preavis: c.preavis,
-      dateSignature: todayStr(), dateDebut: c.dateFin,
-      dateFin: addOneYear(c.dateFin), statut: "actif",
-      notes: `Renouvellement de ${c.ref}`,
-      passages: [], relances: [],
-      dateCreation: Timestamp.now(), ref: nextRef(contrats),
-    };
-    await addDoc(collection(db, "contrats"), payload);
-    await updateDoc(doc(db, "contrats", c.id), { statut: "expiré" });
-    await fetchContrats();
-    setSaving(false);
-    setView("list");
-  };
+
 
   const deleteContrat = async () => {
     if (!selected) return;
@@ -765,13 +738,13 @@ export default function ContratModule() {
         <div className="card">
           <div className="card-title">Dates & statut</div>
           <div className="field"><label>Date de signature</label><input type="date" value={form.dateSignature||""} onChange={e=>set("dateSignature",e.target.value)}/></div>
-          <div className="field"><label>Date de début</label><input type="date" value={form.dateDebut||""} onChange={e=>set("dateDebut",e.target.value)}/></div>
-          {form.dateDebut && <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:12}}>Fin automatique : {fmtDate(addOneYear(form.dateDebut))}</p>}
+          <div className="field"><label>Date de début (engagement 12 mois)</label><input type="date" value={form.dateDebut||""} onChange={e=>set("dateDebut",e.target.value)}/></div>
+          {form.dateDebut && <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:8}}>Fin d'engagement : {fmtDate(addOneYear(form.dateDebut))} — le contrat reste actif au-delà</p>}
+          <div className="field"><label>Date de début réelle de la relation client <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel — si antérieure à l'engagement</span></label><input type="date" value={form.dateDebutClient||""} onChange={e=>set("dateDebutClient",e.target.value)}/></div>
           <div className="field">
             <label>Statut</label>
             <select value={form.statut} onChange={e=>set("statut",e.target.value)}>
               <option value="actif">Actif</option>
-              <option value="expiré">Expiré (contrat historique)</option>
               <option value="résilié">Résilié</option>
               <option value="brouillon">Brouillon</option>
             </select>
@@ -790,7 +763,7 @@ export default function ContratModule() {
 
   if (view === "detail" && selected) {
     const sc        = selected.sc || computeStatut(selected);
-    const days      = getDaysTo(selected.dateFin);
+    // dateFin : info seulement, pas d'alerte
     const sStyle    = statutStyle(sc);
     const annuel    = selected.montantTTC && selected.nbPassages ? (parseFloat(selected.montantTTC) * parseInt(selected.nbPassages)).toFixed(2) : "—";
     const pct       = selected.nbPassages ? Math.min(100, Math.round(((selected.passages||[]).length / selected.nbPassages) * 100)) : 0;
@@ -841,23 +814,11 @@ export default function ContratModule() {
 
         {/* Durée */}
         <div className="card readonly">
-          <div className="card-title">Durée du contrat</div>
+          <div className="card-title">Contrat</div>
           <div className="info-row"><span>Signé le</span><b>{fmtDate(selected.dateSignature)}</b></div>
-          <div className="info-row"><span>Début</span><b>{fmtDate(selected.dateDebut)}</b></div>
-          <div className="info-row">
-            <span>Fin</span>
-            <b style={{color: days!==null&&days<0?"#c0392b":days!==null&&days<=ALERT_DAYS?"#8B6A4E":"var(--color-text-primary)"}}>
-              {fmtDate(selected.dateFin)}
-            </b>
-          </div>
-          {days !== null && (
-            <div className="info-row">
-              <span>Jours restants</span>
-              <b style={{color:days<0?"#c0392b":days<=ALERT_DAYS?"#8B6A4E":"#35B499"}}>
-                {days<0?"Expiré":`${days} jour(s)`}
-              </b>
-            </div>
-          )}
+          {selected.dateDebutClient && <div className="info-row"><span>Début relation client</span><b style={{color:"#35B499"}}>{fmtDate(selected.dateDebutClient)}</b></div>}
+          <div className="info-row"><span>Début engagement</span><b>{fmtDate(selected.dateDebut)}</b></div>
+          <div className="info-row"><span>Fin d'engagement 12 mois</span><b style={{color:"var(--color-text-secondary)"}}>{fmtDate(selected.dateFin)} <span style={{fontSize:11,fontStyle:"italic"}}>(le contrat reste actif au-delà)</span></b></div>
         </div>
 
         {/* Prochaine intervention */}
@@ -996,11 +957,7 @@ export default function ContratModule() {
             </button>
           )}
         </div>
-        {(sc==="à renouveler"||sc==="expiré") && (
-          <button className="btn-finish" style={{width:"100%",marginBottom:28}} disabled={saving} onClick={()=>renouveler(selected)}>
-            {saving?"Renouvellement…":"🔄 Renouveler le contrat (+1 an)"}
-          </button>
-        )}
+
       </div>
     );
   }
@@ -1008,36 +965,31 @@ export default function ContratModule() {
   // ── VUE LISTE ─────────────────────────────────────────────────────────────
 
   const counts = {
-    tous:       contrats.length,
-    actif:      contrats.filter(c=>c.sc==="actif").length,
-    renouveler: contrats.filter(c=>c.sc==="à renouveler").length,
-    expire:     contrats.filter(c=>c.sc==="expiré").length,
-    resilie:    contrats.filter(c=>c.sc==="résilié").length,
-    brouillon:  contrats.filter(c=>c.sc==="brouillon").length,
+    tous:      contrats.length,
+    actif:     contrats.filter(c=>c.sc==="actif").length,
+    resilie:   contrats.filter(c=>c.sc==="résilié").length,
+    brouillon: contrats.filter(c=>c.sc==="brouillon").length,
   };
 
   // Contrats avec prochaine intervention dans <= 15j
   const aRelancer = contrats.filter(c => {
-    if (c.sc==="résilié"||c.sc==="expiré") return false;
+    if (c.sc==="résilié") return false;
     const d = getDaysTo(nextPassageDate(c));
-    // En retard (d < 0) OU dans les RELANCE_ALERT_DAYS prochains jours
     return d!==null && d<=RELANCE_ALERT_DAYS;
   }).length;
 
   // CA annuel total des contrats actifs
   const caAnnuel = contrats
-    .filter(c=>c.sc==="actif"||c.sc==="à renouveler")
+    .filter(c=>c.sc==="actif")
     .reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
 
   const FILTERS = [
-    ["tous","Tous"],["actif","Actifs"],["renouveler","À renouveler"],
-    ["expire","Expirés"],["resilie","Résiliés"],["brouillon","Brouillons"],
+    ["tous","Tous"],["actif","Actifs"],
+    ["resilie","Résiliés"],["brouillon","Brouillons"],
   ];
 
   const filtered = contrats.filter(c => {
-    if (filter==="tous") return true;
-    if (filter==="renouveler") return c.sc==="à renouveler";
-    if (filter==="expire") return c.sc==="expiré";
+    if (filter==="tous")    return true;
     if (filter==="resilie") return c.sc==="résilié";
     return c.sc===filter;
   });
@@ -1073,7 +1025,7 @@ export default function ContratModule() {
   `;
 
   const badgeClass = (sc) => ({
-    "actif":"actif","à renouveler":"renouveler","expiré":"expire","résilié":"resilie","brouillon":"brouillon"
+    "actif":"actif","résilié":"resilie","brouillon":"brouillon"
   }[sc]||"brouillon");
 
   return (
@@ -1087,21 +1039,19 @@ export default function ContratModule() {
           <p className="ctr-kpi-val">{counts.actif}</p>
           <p className="ctr-kpi-sub" style={{color:"#1a7a65"}}>sur {counts.tous} au total</p>
         </div>
-        <div className="ctr-kpi" onClick={()=>setFilter("renouveler")}>
-          <div className="ctr-kpi-accent" style={{background:"#8B6A4E"}}/>
-          <p className="ctr-kpi-label">À renouveler</p>
-          <p className="ctr-kpi-val">{counts.renouveler}</p>
-          <p className="ctr-kpi-sub" style={{color:counts.renouveler>0?"#8B6A4E":"#888"}}>
-            {counts.renouveler>0?"Action requise":"Aucun"}
-          </p>
-        </div>
         <div className="ctr-kpi" onClick={()=>{}}>
           <div className="ctr-kpi-accent" style={{background:aRelancer>0?"#8B6A4E":"#35B499"}}/>
-          <p className="ctr-kpi-label">Relances à faire</p>
+          <p className="ctr-kpi-label">Passages à planifier</p>
           <p className="ctr-kpi-val">{aRelancer}</p>
           <p className="ctr-kpi-sub" style={{color:aRelancer>0?"#8B6A4E":"#888"}}>
-            {aRelancer>0?"Passage à planifier":"À jour"}
+            {aRelancer>0?"Relances à faire":"À jour"}
           </p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>setFilter("resilie")}>
+          <div className="ctr-kpi-accent" style={{background:"#888"}}/>
+          <p className="ctr-kpi-label">Résiliés</p>
+          <p className="ctr-kpi-val">{counts.resilie}</p>
+          <p className="ctr-kpi-sub" style={{color:"#888"}}>contrats terminés</p>
         </div>
         <div className="ctr-kpi" onClick={()=>{}}>
           <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
@@ -1159,7 +1109,7 @@ export default function ContratModule() {
                 {filtered.map(c=>{
                   const next        = nextPassageDate(c);
                   const daysNext    = getDaysTo(next);
-                  const daysContrat = getDaysTo(c.dateFin);
+
                   const alert       = daysNext!==null&&(daysNext<0||(daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré"));
                   const annuel      = c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
                   const pct         = c.nbPassages?Math.min(100,Math.round(((c.passages||[]).length/c.nbPassages)*100)):0;
@@ -1201,10 +1151,9 @@ export default function ContratModule() {
                           </span>
                         ):<span style={{color:"#ccc"}}>—</span>}
                       </td>
-                      <td style={{fontSize:11,whiteSpace:"nowrap",color:daysContrat!==null&&daysContrat<=ALERT_DAYS&&daysContrat>=0?"#8B6A4E":daysContrat!==null&&daysContrat<0?"#c0392b":"#888"}}>
+                      <td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>
                         {fmtDate(c.dateFin)}
-                        {daysContrat!==null&&daysContrat>=0&&daysContrat<=ALERT_DAYS&&<span style={{display:"block",fontSize:10}}>dans {daysContrat}j</span>}
-                        {daysContrat!==null&&daysContrat<0&&<span style={{display:"block",fontSize:10}}>expiré</span>}
+                        <span style={{display:"block",fontSize:10,fontStyle:"italic",color:"#bbb"}}>fin engagement</span>
                       </td>
                       <td>
                         <span className={`ctr-badge ${badgeClass(c.sc)}`}>{c.sc}</span>
