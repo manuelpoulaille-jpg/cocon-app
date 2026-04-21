@@ -56,11 +56,36 @@ function getDaysTo(dateStr) {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-// Compte les passages dans la période dateDebut -> dateFin
+// Calcule la période active dynamiquement (tranche 12 mois en cours)
+// basée sur dateDebut + multiples de 12 mois — pas besoin de mettre à jour dateFin
+function periodeActive(c) {
+  if (!c.dateDebut) return { debut: null, fin: null };
+  const today = new Date();
+  const [y, m, d] = c.dateDebut.split("-").map(Number);
+  let debut = new Date(y, m - 1, d);
+  // Avancer par tranches de 12 mois jusqu'à trouver la tranche qui contient aujourd'hui
+  let fin = new Date(debut);
+  fin.setFullYear(fin.getFullYear() + 1);
+  fin.setDate(fin.getDate() - 1); // fin inclusive = veille du 12e mois+1
+  while (fin < today) {
+    debut.setFullYear(debut.getFullYear() + 1);
+    fin.setFullYear(fin.getFullYear() + 1);
+  }
+  const toStr = (d) => {
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  };
+  return { debut: toStr(debut), fin: toStr(fin) };
+}
+
+// Compte les passages dans la période active dynamique
 function passagesPeriode(c) {
-  if (!c.dateDebut || !c.dateFin) return { realises: (c.passages||[]).length, attendus: parseInt(c.nbPassages)||4 };
-  const passages = (c.passages || []).filter(p => p.date >= c.dateDebut && p.date <= c.dateFin);
-  return { realises: passages.length, attendus: parseInt(c.nbPassages) || 4 };
+  const { debut, fin } = periodeActive(c);
+  if (!debut || !fin) return { realises: (c.passages||[]).length, attendus: parseInt(c.nbPassages)||4, debut, fin };
+  const passages = (c.passages || []).filter(p => p.date >= debut && p.date <= fin);
+  return { realises: passages.length, attendus: parseInt(c.nbPassages) || 4, debut, fin };
 }
 
 // Calcule la date approximative du prochain passage
@@ -882,10 +907,16 @@ export default function ContratModule() {
           <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>
             <b style={{color:pasRealises>=pasAttendus?"#35B499":"var(--color-text-primary)"}}>{pasRealises} / {pasAttendus}</b> passages réalisés sur la période en cours
           </p>
-          <p style={{fontSize:11,color:"#888",marginBottom:14,fontStyle:"italic"}}>
-            {selected.dateDebut?fmtDate(selected.dateDebut):"—"} → {selected.dateFin?fmtDate(selected.dateFin):"—"}
-            {" · "}{(selected.passages||[]).length} passage{(selected.passages||[]).length>1?"s":""} au total depuis le début
-          </p>
+          {(() => {
+            const { debut, fin } = passagesPeriode(selected);
+            const total = (selected.passages||[]).length;
+            return (
+              <p style={{fontSize:11,color:"#888",marginBottom:14,fontStyle:"italic"}}>
+                Période en cours : {debut?fmtDate(debut):"—"} → {fin?fmtDate(fin):"—"}
+                {" · "}{total} passage{total>1?"s":""} au total depuis le début
+              </p>
+            );
+          })()}
           {(selected.passages||[]).length===0 && (
             <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12,fontStyle:"italic"}}>Aucun passage enregistré.</p>
           )}
