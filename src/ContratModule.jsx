@@ -1,0 +1,1215 @@
+import React, { useState, useEffect } from "react";
+import { db } from "../firebase";
+import {
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp,
+} from "firebase/firestore";
+import logoBase64 from "../logoBase64";
+
+// ── CONSTANTES ────────────────────────────────────────────────────────────────
+
+const RELANCE_ALERT_DAYS = 15; // alerte prochaine intervention
+
+const COCON_INFO = {
+  nom: "Cocon Plus SARL",
+  adresse: "Berges de Kerlys, 97200 Fort-de-France",
+  siret: "47756829900028",
+  tel: "0596 73 66 66",
+  email: "contact@cocon-protection.fr",
+  web: "www.cocon-plus.fr",
+  representant: "Jean-Marc SERVAND",
+};
+
+const PRESTATION_OPTIONS = [
+  "Désinsectisation", "Dératisation", "Désinfection", "HACCP",
+  "Traitement anti-termites", "Traitement anti-chauves-souris", "Étanchéité de toiture",
+];
+
+const EMPTY_FORM = {
+  clientNom: "", clientResponsable: "", clientAdresse: "",
+  clientTel: "", clientEmail: "", adresseIntervention: "",
+  prestations: [], nbPassages: 4, montantHT: "", montantTTC: "",
+  fraisDeplacement: 30, preavis: 1,
+  dateSignature: "", dateDebut: "", dateDebutClient: "", statut: "actif", notes: "",
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+
+function todayStr() {
+  return new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
+}
+
+function addOneYear(dateStr) {
+  if (!dateStr) return "";
+  // Parser en local (pas UTC) pour eviter le decalage Martinique UTC-4
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const next = new Date(y + 1, m - 1, d);
+  const yy = next.getFullYear();
+  const mm = String(next.getMonth() + 1).padStart(2, "0");
+  const dd = String(next.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function getDaysTo(dateStr) {
+  if (!dateStr) return null;
+  // Forcer parsing local avec T00:00:00 pour eviter decalage UTC Martinique
+  const diff = new Date(dateStr + "T00:00:00") - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+// Calcule la période active dynamiquement (tranche 12 mois en cours)
+// basée sur dateDebut + multiples de 12 mois — pas besoin de mettre à jour dateFin
+function periodeActive(c) {
+  if (!c.dateDebut) return { debut: null, fin: null };
+  const today = new Date();
+  const [y, m, d] = c.dateDebut.split("-").map(Number);
+  let debut = new Date(y, m - 1, d);
+  // Avancer par tranches de 12 mois jusqu'à trouver la tranche qui contient aujourd'hui
+  let fin = new Date(debut);
+  fin.setFullYear(fin.getFullYear() + 1);
+  fin.setDate(fin.getDate() - 1); // fin inclusive = veille du 12e mois+1
+  while (fin < today) {
+    debut.setFullYear(debut.getFullYear() + 1);
+    fin.setFullYear(fin.getFullYear() + 1);
+  }
+  const toStr = (d) => {
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  };
+  return { debut: toStr(debut), fin: toStr(fin) };
+}
+
+// Compte les passages dans la période active dynamique
+function passagesPeriode(c) {
+  const { debut, fin } = periodeActive(c);
+  if (!debut || !fin) return { realises: (c.passages||[]).length, attendus: parseInt(c.nbPassages)||4, debut, fin };
+  const passages = (c.passages || []).filter(p => p.date >= debut && p.date <= fin);
+  return { realises: passages.length, attendus: parseInt(c.nbPassages) || 4, debut, fin };
+}
+
+// Calcule la date approximative du prochain passage
+function nextPassageDate(c) {
+  const nb = parseInt(c.nbPassages) || 4;
+  const intervalDays = Math.round(365 / nb);
+  const passages = (c.passages || []).map(p => p.date).filter(Boolean).sort();
+  let baseDate;
+  if (passages.length > 0) {
+    // Depuis le dernier passage
+    baseDate = new Date(passages[passages.length - 1] + "T00:00:00");
+  } else if (c.dateDebut) {
+    // Depuis le début du contrat
+    baseDate = new Date(c.dateDebut + "T00:00:00");
+  } else {
+    return null;
+  }
+  const next = new Date(baseDate);
+  next.setDate(next.getDate() + intervalDays);
+  // On retourne la VRAIE prochaine echeance meme si elle est depassee
+  // pour alerter le retard — pas de saut automatique
+  const yy = next.getFullYear();
+  const mm = String(next.getMonth() + 1).padStart(2, "0");
+  const dd = String(next.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function fmtDate(str) {
+  if (!str) return "—";
+  const [y, m, d] = str.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function computeStatut(c) {
+  if (c.statut === "résilié" || c.statut === "brouillon") return c.statut;
+  return "actif";
+}
+
+function statutStyle(s) {
+  return {
+    "actif":     { bg: "#e1f5ee", color: "#0e6b50" },
+    "résilié":   { bg: "var(--color-background-secondary)", color: "var(--color-text-secondary)" },
+    "brouillon": { bg: "#f0f0f0", color: "#888" },
+  }[s] || { bg: "#eee", color: "#333" };
+}
+
+// ── PDF ───────────────────────────────────────────────────────────────────────
+
+async function generatePDF(c) {
+  try {
+    const {
+      Document, Packer, Paragraph, Table, TableRow, TableCell,
+      TextRun, AlignmentType, WidthType, BorderStyle,
+      ShadingType, VerticalAlign, HeightRule,
+    } = await import("docx");
+
+  const TEAL    = "35B499";
+  const WHITE   = "FFFFFF";
+  const DARK    = "1A1A1A";
+  const GRAY    = "888888";
+  const LIGHTBG = "F0FAF6";
+  const ALTBG   = "F5F5F5";
+
+  const BORDER_TEAL = { style: BorderStyle.SINGLE, size: 6,  color: TEAL };
+  const BORDER_GRAY = { style: BorderStyle.SINGLE, size: 4,  color: "CCCCCC" };
+  const NO_BORDER   = { style: BorderStyle.NIL };
+  const ALL_GRAY    = { top: BORDER_GRAY, bottom: BORDER_GRAY, left: BORDER_GRAY, right: BORDER_GRAY };
+  const ALL_TEAL    = { top: BORDER_TEAL, bottom: BORDER_TEAL, left: BORDER_TEAL, right: BORDER_TEAL };
+
+  const nb       = parseInt(c.nbPassages) || 4;
+  const mHT      = parseFloat(c.montantHT)  || 0;
+  const mTTC     = parseFloat(c.montantTTC) || 0;
+  const intervalM = Math.round(12 / nb);
+  const preavis  = parseInt(c.preavis) || 1;
+  const frais    = parseFloat(c.fraisDeplacement) || 30;
+  const lieu     = c.adresseIntervention || c.clientAdresse || "—";
+  const prest    = c.prestations || [];
+  const [jj,mm2,aaaa] = (c.dateSignature || new Date().toLocaleDateString("fr-CA")).split("-").reverse();
+  const dateFr   = `${jj} / ${mm2} / ${aaaa}`;
+
+  // Détermine si c'est une société (clientResponsable renseigné = société)
+  const isSociete = !!(c.clientResponsable && c.clientResponsable.trim());
+
+  // Label de la prestation pour Art.3
+  const hasDerat  = prest.includes("Dératisation");
+  const hasDesins = prest.includes("Désinsectisation");
+  const hasHACCP  = prest.includes("HACCP");
+  const hasDesInf = prest.includes("Désinfection");
+  let labelPrest = "";
+  if (hasHACCP) labelPrest = "dératisation/désinsectisation conforme HACCP";
+  else if (hasDerat && hasDesins) labelPrest = "dératisation et désinsectisation";
+  else if (hasDerat)  labelPrest = "dératisation";
+  else if (hasDesins) labelPrest = "désinsectisation";
+  else if (hasDesInf) labelPrest = "désinfection";
+  else labelPrest = prest.join(", ");
+
+  // Texte nature de l'intervention selon prestation
+  let natureText = "";
+  if (hasHACCP) {
+    natureText = "Le prestataire interviendra pour l'élimination et le contrôle des nuisibles (insectes et rongeurs) présents dans les locaux désignés, conformément aux exigences HACCP applicables aux zones alimentaires. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.";
+  } else if (hasDerat) {
+    natureText = "Le prestataire interviendra pour l'élimination et le contrôle des nuisibles (rongeurs) présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.";
+  } else if (hasDesins) {
+    natureText = "Le prestataire interviendra pour l'élimination et le contrôle des insectes nuisibles présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.";
+  } else {
+    natureText = "Le prestataire interviendra pour l'élimination et le contrôle des nuisibles présents dans les locaux désignés, conformément aux réglementations en vigueur. Le traitement vise à assurer l'éradication complète des nuisibles et à prévenir toute réinfestation.";
+  }
+
+  // ── HELPERS ────────────────────────────────────────────────────────────────
+
+  const run = (text, opts = {}) => new TextRun({
+    text, font: "Arial",
+    size:    opts.size    ?? 22,
+    bold:    opts.bold    ?? false,
+    italics: opts.italic  ?? false,
+    color:   opts.color   ?? DARK,
+  });
+
+  const para = (runs, opts = {}) => new Paragraph({
+    children: Array.isArray(runs) ? runs : [runs],
+    alignment: opts.align ?? AlignmentType.LEFT,
+    spacing: {
+      before: opts.before ?? 40,
+      after:  opts.after  ?? 40,
+      line: 276,
+    },
+    indent: opts.indent ? { left: opts.indent } : undefined,
+  });
+
+  const spacer = () => new Paragraph({
+    children: [new TextRun({ text: "", size: 8 })],
+    spacing: { before: 0, after: 0 },
+  });
+
+  const tealCell = (text, colSpan = 1) => new TableCell({
+    children: [new Paragraph({
+      children: [run(text, { bold: true, color: WHITE, size: 20 })],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 60, after: 60 },
+    })],
+    columnSpan: colSpan,
+    shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+    borders: ALL_TEAL,
+    margins: { top: 60, bottom: 60, left: 120, right: 120 },
+    verticalAlign: VerticalAlign.CENTER,
+  });
+
+  const dataCell = (runs, shade = false, widthPct = 50) => new TableCell({
+    children: [new Paragraph({
+      children: Array.isArray(runs) ? runs : [runs],
+      spacing: { before: 40, after: 40 },
+    })],
+    shading: shade ? { type: ShadingType.SOLID, color: ALTBG, fill: ALTBG } : undefined,
+    borders: ALL_GRAY,
+    margins: { top: 60, bottom: 60, left: 120, right: 120 },
+    width: { size: widthPct, type: WidthType.PERCENTAGE },
+    verticalAlign: VerticalAlign.CENTER,
+  });
+
+  const boldLabel = (label, value) => [
+    run(label, { bold: true, size: 20 }),
+    run(value, { size: 20 }),
+  ];
+
+  const artHeader = (num, title) => new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
+    rows: [new TableRow({
+      children: [new TableCell({
+        children: [para(run(`Article ${num} : ${title}`, { bold: true, color: WHITE, size: 20 }), { before: 60, after: 60 })],
+        shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+        borders: ALL_TEAL,
+        margins: { top: 60, bottom: 60, left: 140, right: 140 },
+      })],
+    })],
+  });
+
+  const contentBlock = (paragraphs, shade = false) => new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
+    rows: [new TableRow({
+      children: [new TableCell({
+        children: paragraphs,
+        shading: shade ? { type: ShadingType.SOLID, color: LIGHTBG, fill: LIGHTBG } : undefined,
+        borders: ALL_GRAY,
+        margins: { top: 80, bottom: 80, left: 160, right: 160 },
+      })],
+    })],
+  });
+
+  const chkLine = (checked, label) => new Paragraph({
+    children: [
+      run(checked ? "☑" : "☐", { color: checked ? TEAL : DARK, size: 22 }),
+      run("  " + label, { size: 20 }),
+    ],
+    spacing: { before: 30, after: 30 },
+  });
+
+  const bullet = (text) => new Paragraph({
+    children: [run("•   " + text, { size: 20 })],
+    indent: { left: 360 },
+    spacing: { before: 30, after: 30 },
+  });
+
+  // ── TABLEAU PARTIES ────────────────────────────────────────────────────────
+
+  // Ligne 1 : Raison sociale ou Nom/Prénom selon type
+  const clientLigne1Label = isSociete ? "Raison sociale : " : "Nom et Prénom : ";
+  const clientLigne1Value = c.clientNom;
+  const clientRepLabel    = isSociete ? "Représenté par : " : "Représenté par : ";
+  const clientRepValue    = isSociete ? (c.clientResponsable || "") : "";
+
+  const partyRows = [
+    [boldLabel("Raison sociale : ", "Cocon Plus"),   boldLabel(clientLigne1Label, clientLigne1Value)],
+    [boldLabel("Adresse : ", "Berges de Kerlys, 97200 Fort-de-France"), boldLabel("Adresse : ", c.clientAdresse || "—")],
+    [boldLabel("SIRET : ", "47756829900028"),         boldLabel("SIRET : ", c.clientSiret || "")],
+    [boldLabel("Représenté par : ", "Jean-Marc SERVAND"), boldLabel(clientRepLabel, clientRepValue)],
+    [boldLabel("Téléphone : ", "0596 73 66 66 / 06 96 69 48 00"), boldLabel("Téléphone : ", c.clientTel || "—")],
+    [boldLabel("Email : ", "contact@cocon-plus.fr"), boldLabel("Email : ", c.clientEmail || "—")],
+  ];
+
+  const partiesTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [4750, 4750],
+    rows: [
+      new TableRow({ children: [tealCell("Le Prestataire"), tealCell("Le Client")] }),
+      ...partyRows.map((r, i) => new TableRow({
+        children: [dataCell(r[0], i % 2 === 0), dataCell(r[1], i % 2 === 0)],
+      })),
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [para([
+              run('Ci-après désigné ', { bold: true, italic: true, size: 18, color: WHITE }),
+              run('"Le Prestataire"', { bold: true, italic: true, size: 18, color: WHITE }),
+            ], { align: AlignmentType.CENTER, before: 60, after: 60 })],
+            shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+            borders: ALL_TEAL,
+            margins: { top: 60, bottom: 60, left: 120, right: 120 },
+          }),
+          new TableCell({
+            children: [para([
+              run('Ci-après désigné ', { bold: true, italic: true, size: 18, color: WHITE }),
+              run('"Le Client"', { bold: true, italic: true, size: 18, color: WHITE }),
+            ], { align: AlignmentType.CENTER, before: 60, after: 60 })],
+            shading: { type: ShadingType.SOLID, color: TEAL, fill: TEAL },
+            borders: ALL_TEAL,
+            margins: { top: 60, bottom: 60, left: 120, right: 120 },
+          }),
+        ],
+      }),
+    ],
+  });
+
+  // ── TABLEAU SIGNATURES ────────────────────────────────────────────────────
+
+  const sigTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [4750, 4750],
+    rows: [
+      new TableRow({ children: [tealCell("Le Prestataire"), tealCell("Le Client")] }),
+      new TableRow({
+        height: { value: 1200, rule: HeightRule.EXACT },
+        children: [
+          new TableCell({
+            children: [para([
+              run("Signature : ___________________________________ ", { size: 20 }),
+              run("Nom : ___________________________________", { size: 20 }),
+            ], { before: 80, after: 80 })],
+            borders: ALL_GRAY,
+            margins: { top: 160, bottom: 160, left: 160, right: 160 },
+          }),
+          new TableCell({
+            children: [para([
+              run("Signature : ___________________________________ ", { size: 20 }),
+              run("Nom : ___________________________________", { size: 20 }),
+            ], { before: 80, after: 80 })],
+            borders: ALL_GRAY,
+            margins: { top: 160, bottom: 160, left: 160, right: 160 },
+          }),
+        ],
+      }),
+    ],
+  });
+
+  // ── DOCUMENT ──────────────────────────────────────────────────────────────
+
+  const doc = new Document({
+    sections: [{
+      properties: {
+        page: { margin: { top: 720, bottom: 720, left: 900, right: 900 } },
+      },
+      children: [
+        // Titre
+        para(run("Contrat dératisation / désinsectisation", { bold: true, size: 28, color: TEAL }),
+          { align: AlignmentType.CENTER, before: 0, after: 60 }),
+        para(run("La maison protégée – Solutions antiparasitaires", { italic: true, size: 20, color: GRAY }),
+          { align: AlignmentType.CENTER, before: 0, after: 160 }),
+
+        partiesTable,
+        spacer(),
+
+        para(run("Il a été arrêté et convenu ce qui suit :", { bold: true, size: 22 }),
+          { before: 120, after: 160 }),
+
+        // ART 1
+        artHeader("1", "Descriptif de la prestation"),
+        contentBlock([
+          chkLine(hasDesins, "Désinsectisation"),
+          chkLine(hasDerat,  "Dératisation"),
+          chkLine(hasHACCP,  "Dératisation et/ou désinsectisation conforme HACCP pour les zones alimentaires"),
+          chkLine(hasDesInf, "Désinfection"),
+          spacer(),
+          para(run("Sur les lieux suivants :", { size: 20 }), { before: 40, after: 20 }),
+          para(run("•   " + lieu, { size: 20 }), { indent: 360, before: 20, after: 40 }),
+          spacer(),
+          para(run("Nature de l'intervention :", { bold: true, size: 20 }), { before: 40, after: 40 }),
+          para(run(natureText, { size: 20 }), { before: 20, after: 40 }),
+        ]),
+
+        spacer(),
+
+        // ART 2
+        artHeader("2", "Modalités de rémunération"),
+        contentBlock([
+          new Paragraph({
+            children: [
+              run("Le client s'engage à verser une rémunération au Prestataire d'un montant de ", { size: 20 }),
+              run(`${mHT.toFixed(2)} € HT`, { bold: true, size: 20 }),
+              run(` (soit `, { size: 20 }),
+              run(`${mTTC.toFixed(2)} € TTC`, { bold: true, size: 20 }),
+              run(`) par passage.`, { size: 20 }),
+            ],
+            spacing: { before: 40, after: 40, line: 276 },
+          }),
+        ], true),
+
+        spacer(),
+
+        // ART 3
+        artHeader("3", "Fréquence et durée d'engagement"),
+        contentBlock([
+          new Paragraph({
+            children: [
+              run(`Nombre de passages annuels pour le traitement de ${labelPrest} : `, { size: 20 }),
+              run(`${nb} (tous les ${intervalM} mois)`, { size: 20 }),
+            ],
+            spacing: { before: 40, after: 40, line: 276 },
+          }),
+          spacer(),
+          new Paragraph({
+            children: [
+              run("Durée d'engagement : ", { bold: true, size: 20 }),
+              run("1 an à compter de la date de la première intervention.", { size: 20 }),
+            ],
+            spacing: { before: 40, after: 40, line: 276 },
+          }),
+          spacer(),
+          para(run("Le contrat est renouvelable par tacite reconduction, sauf dénonciation par l'une des parties dans les conditions prévues à l'article 5.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 4
+        artHeader("4", "Engagements et obligations du client"),
+        contentBlock([
+          para(run("Le client s'engage à :", { size: 20 }), { before: 40, after: 20 }),
+          bullet("Laisser au prestataire et à son personnel libre accès aux locaux, et particulièrement à ceux nommément désignés, chaque fois que cela sera nécessaire pour la réalisation des interventions."),
+          bullet("Ne pas faire usage d'autres produits ou autres procédés pendant la durée du contrat qui pourraient être nuisibles à l'efficacité des interventions."),
+          bullet("Ne pas déplacer les postes d'appâtage ou autre dispositif."),
+          bullet("Respecter les consignes et prescriptions de nos intervenants."),
+          spacer(),
+          para(run("Précautions à prendre :", { bold: true, size: 20 }), { before: 40, after: 40 }),
+          para(run("Nous utilisons des produits chimiques. Les enfants, animaux et végétaux doivent impérativement rester à l'écart des locaux traités pendant toute la durée des traitements. Le client s'engage à veiller à cette obligation, et d'en informer son entourage, son personnel et sa clientèle.", { size: 20 })),
+          spacer(),
+          para(run("Dommages causés par les nuisibles :", { bold: true, size: 20 }), { before: 40, after: 40 }),
+          para(run("Le prestataire décline toute responsabilité pour les dommages causés par les rongeurs et les insectes aux installations, machines, matériels et marchandises. Il en est de même pour tout dommage direct ou indirect causé par les rongeurs et insectes aux personnes ou animaux.", { size: 20 })),
+        ], true),
+
+        spacer(),
+
+        // ART 5
+        artHeader("5", "Durée de validité du contrat"),
+        contentBlock([
+          para(run("Le contrat est conclu pour une durée déterminée de 1 an.", { size: 20 })),
+          para(run("La validité du contrat commence dès la signature du présent contrat et se termine à la fin des prestations convenues entre les parties.", { size: 20 })),
+          para(run(`Chacune des parties peut y mettre fin avec un préavis de ${preavis} mois.`, { size: 20 })),
+          para(run("La durée du contrat peut être élargie par un consensus écrit des deux parties.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 6
+        artHeader("6", "Obligation de délivrance"),
+        contentBlock([
+          para(run("Les délais de l'intervention ne sont donnés qu'à titre indicatif ; ils ne constituent aucun engagement de notre part.", { size: 20 })),
+          new Paragraph({
+            children: [
+              run("Dans le cas d'un rendez-vous, si l'intervention n'a pas été effectuée en raison d'un empêchement de la part du client, le déplacement sera facturé : ", { size: 20 }),
+              run(`${frais.toFixed(2)} €.`, { bold: true, size: 20 }),
+            ],
+            spacing: { before: 40, after: 40, line: 276 },
+          }),
+        ], true),
+
+        spacer(),
+
+        // ART 7
+        artHeader("7", "Rupture du contrat"),
+        contentBlock([
+          para(run("Pour tout manquement des obligations par l'une des parties, l'autre partie pourra invoquer son droit de résiliation du contrat à tacite reconduction dans le cas où la mise en demeure persiste au-delà d'un mois.", { size: 20 })),
+        ]),
+
+        spacer(),
+
+        // ART 8
+        artHeader("8", "Loi applicable"),
+        contentBlock([
+          para(run("Le présent contrat est soumis aux lois françaises. En l'absence de la bonne exécution du contrat, ce dernier sera soumis par les tribunaux compétents de Fort-de-France, soumis au droit français.", { size: 20 })),
+        ], true),
+
+        spacer(),
+
+        // ART 9
+        artHeader("9", "Modifications du contrat"),
+        contentBlock([
+          para(run("Chaque modification du contrat fera l'objet d'une signature entre chaque Partie ou leurs représentants autorisés.", { size: 20 })),
+        ]),
+
+        spacer(), spacer(),
+
+        new Paragraph({
+          children: [run(`Fait le ${dateFr} en deux exemplaires à Fort-de-France`, { bold: true, size: 22 })],
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 160, after: 160, line: 276 },
+          keepNext: true,
+          keepLines: true,
+        }),
+
+        sigTable,
+
+        spacer(),
+
+        para(run("Paraphez chaque page du contrat", { italic: true, size: 18, color: GRAY }),
+          { align: AlignmentType.CENTER, before: 80, after: 0 }),
+      ],
+    }],
+  });
+
+
+
+    const blob = await Packer.toBlob(doc);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `contrat-${c.ref}-${(c.clientNom||"client").replace(/\s+/g,"-")}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(err) {
+    console.error("Erreur génération contrat:", err);
+    alert("Erreur génération : " + (err?.message || String(err)));
+  }
+}
+
+
+// ── COMPOSANT PRINCIPAL ───────────────────────────────────────────────────────
+
+export default function ContratModule() {
+  const [view,     setView]     = useState("list");
+  const [contrats, setContrats] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filter,   setFilter]   = useState("tous");
+  const [form,     setForm]     = useState({ ...EMPTY_FORM });
+  const [isEdit,   setIsEdit]   = useState(false);
+  const [saving,   setSaving]   = useState(false);
+
+  // Passages
+  const [newPassage,      setNewPassage]      = useState("");
+  const [confirmDelete,   setConfirmDelete]   = useState(false);
+  const [confirmResilier, setConfirmResilier] = useState(false);
+
+  // Relances
+  const [newRelanceDate, setNewRelanceDate] = useState("");
+  const [newRelanceNote, setNewRelanceNote] = useState("");
+
+  useEffect(() => {
+    fetchContrats();
+    if (!document.getElementById("ctr-styles")) {
+      const el = document.createElement("style");
+      el.id = "ctr-styles"; el.textContent = TABLE_CSS;
+      document.head.appendChild(el);
+    }
+  }, []);
+
+  // ── FIRESTORE ─────────────────────────────────────────────────────────────
+
+  const fetchContrats = async (currentSel) => {
+    const snap = await getDocs(collection(db, "contrats"));
+    const all = snap.docs
+      .map(d => {
+        const data = { id: d.id, ...d.data() };
+        data.passages = data.passages || [];
+        data.relances = data.relances || [];
+        return { ...data, sc: computeStatut(data) };
+      })
+      .sort((a, b) => {
+        const order = { "brouillon": 0, "actif": 1, "résilié": 2 };
+        return (order[a.sc] ?? 5) - (order[b.sc] ?? 5);
+      });
+    setContrats(all);
+    // Resync selected depuis Firestore pour rafraichir date + relances + KPI
+    const sel = currentSel || null;
+    if (sel) {
+      const fresh = all.find(c => c.id === sel.id);
+      if (fresh) setSelected(fresh);
+    }
+    return all;
+  };
+
+  const nextRef = (list) => {
+    const nums = list.map(c => parseInt((c.ref || "").replace("CTR-", "") || "0")).filter(Boolean);
+    return "CTR-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(5, "0");
+  };
+
+  const saveContrat = async () => {
+    setSaving(true);
+    const payload = {
+      ...form,
+      dateFin:          addOneYear(form.dateDebut),
+      montantHT:        parseFloat(form.montantHT)        || 0,
+      montantTTC:       parseFloat(form.montantTTC)       || 0,
+      fraisDeplacement: parseFloat(form.fraisDeplacement) || 0,
+      nbPassages:       parseInt(form.nbPassages)         || 4,
+      preavis:          parseInt(form.preavis)            || 1,
+    };
+    delete payload.sc;
+    if (isEdit && form.id) {
+      await updateDoc(doc(db, "contrats", form.id), payload);
+    } else {
+      payload.ref          = nextRef(contrats);
+      payload.dateCreation = Timestamp.now();
+      payload.passages     = [];
+      payload.relances     = [];
+      await addDoc(collection(db, "contrats"), payload);
+    }
+    await fetchContrats();
+    setSaving(false);
+    setView("list");
+  };
+
+  const addPassage = async () => {
+    if (!newPassage || !selected) return;
+    const updated = [...(selected.passages || []), { date: newPassage }]
+      .sort((a, b) => a.date.localeCompare(b.date));
+    await updateDoc(doc(db, "contrats", selected.id), { passages: updated });
+    const refreshed = { ...selected, passages: updated };
+    setSelected({ ...refreshed, sc: computeStatut(refreshed) });
+    setNewPassage("");
+    fetchContrats(refreshed);
+  };
+
+  const removePassage = async (idx) => {
+    const updated = (selected.passages || []).filter((_, i) => i !== idx);
+    await updateDoc(doc(db, "contrats", selected.id), { passages: updated });
+    const refreshed = { ...selected, passages: updated };
+    setSelected({ ...refreshed, sc: computeStatut(refreshed) });
+    fetchContrats(refreshed);
+  };
+
+  const addRelance = async () => {
+    if (!newRelanceDate || !selected) return;
+    const updated = [
+      ...(selected.relances || []),
+      { date: newRelanceDate, note: newRelanceNote || "" },
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    await updateDoc(doc(db, "contrats", selected.id), { relances: updated });
+    const refreshed = { ...selected, relances: updated };
+    setSelected({ ...refreshed, sc: computeStatut(refreshed) });
+    setNewRelanceDate("");
+    setNewRelanceNote("");
+    fetchContrats(refreshed);
+  };
+
+  const removeRelance = async (idx) => {
+    const updated = (selected.relances || []).filter((_, i) => i !== idx);
+    await updateDoc(doc(db, "contrats", selected.id), { relances: updated });
+    const refreshed = { ...selected, relances: updated };
+    setSelected({ ...refreshed, sc: computeStatut(refreshed) });
+    fetchContrats(refreshed);
+  };
+
+
+
+  const deleteContrat = async () => {
+    if (!selected) return;
+    await deleteDoc(doc(db, "contrats", selected.id));
+    setConfirmDelete(false);
+    setSelected(null);
+    setView("list");
+    await fetchContrats();
+  };
+
+  const resilierContrat = async () => {
+    if (!selected) return;
+    await updateDoc(doc(db, "contrats", selected.id), { statut: "résilié" });
+    const refreshed = { ...selected, statut: "résilié", sc: "résilié" };
+    setSelected(refreshed);
+    await fetchContrats(refreshed);
+  };
+
+  // ── VUE FORMULAIRE ────────────────────────────────────────────────────────
+
+  if (view === "form") {
+    const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setView("list")}>← Retour</button>
+          <h2>{isEdit ? `Modifier ${form.ref}` : "Nouveau contrat"}</h2>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Client</div>
+          {[
+            ["clientNom",           "Nom / Raison sociale *"],
+            ["clientResponsable",   "Responsable (si société)"],
+            ["clientAdresse",       "Adresse du siège *"],
+            ["clientSiret",          "SIRET client (optionnel)"],
+            ["clientTel",           "Téléphone"],
+            ["clientEmail",         "Email"],
+            ["adresseIntervention", "Adresse d'intervention (si différente)"],
+          ].map(([key, label]) => (
+            <div className="field" key={key}>
+              <label>{label}</label>
+              <input type="text" value={form[key] || ""} onChange={e => set(key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Prestation</div>
+          <div className="field">
+            <label>Types de prestation</label>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:6 }}>
+              {PRESTATION_OPTIONS.map(p => {
+                const active = (form.prestations || []).includes(p);
+                return (
+                  <div key={p} onClick={() => set("prestations", active ? form.prestations.filter(x=>x!==p) : [...(form.prestations||[]),p])}
+                    style={{ padding:"6px 14px", borderRadius:20, fontSize:13, cursor:"pointer", background:active?"#35B499":"transparent", color:active?"white":"var(--color-text-secondary)", border:active?"none":"0.5px solid var(--color-border-secondary)" }}>
+                    {p}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {[
+            ["nbPassages",       "Passages par an",              "number"],
+            ["montantHT",        "Montant / passage HT (€)",     "number"],
+            ["montantTTC",       "Montant / passage TTC (€)",    "number"],
+            ["fraisDeplacement", "Frais déplacement absent (€)", "number"],
+            ["preavis",          "Préavis résiliation (mois)",   "number"],
+          ].map(([key, label, type]) => (
+            <div className="field" key={key}>
+              <label>{label}</label>
+              <input type={type} value={form[key] ?? ""} onChange={e => set(key, e.target.value)} />
+            </div>
+          ))}
+          {form.montantTTC && form.nbPassages && (
+            <p style={{ fontSize:12, color:"#35B499", marginTop:4 }}>
+              Total annuel TTC : {(parseFloat(form.montantTTC) * parseInt(form.nbPassages)).toFixed(2)} €
+            </p>
+          )}
+          {form.nbPassages && (
+            <p style={{ fontSize:12, color:"var(--color-text-secondary)", marginTop:2 }}>
+              Intervalle entre passages : ~{Math.round(12 / parseInt(form.nbPassages))} mois
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Dates & statut</div>
+          <div className="field"><label>Date de signature</label><input type="date" value={form.dateSignature||""} onChange={e=>set("dateSignature",e.target.value)}/></div>
+          <div className="field"><label>Date de début (engagement 12 mois)</label><input type="date" value={form.dateDebut||""} onChange={e=>set("dateDebut",e.target.value)}/></div>
+          {form.dateDebut && <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:8}}>Fin d'engagement : {fmtDate(addOneYear(form.dateDebut))} — le contrat reste actif au-delà</p>}
+          <div className="field"><label>Date de début réelle de la relation client <span style={{fontWeight:400,fontSize:12,color:"#888"}}>optionnel — si antérieure à l'engagement</span></label><input type="date" value={form.dateDebutClient||""} onChange={e=>set("dateDebutClient",e.target.value)}/></div>
+          <div className="field">
+            <label>Statut</label>
+            <select value={form.statut} onChange={e=>set("statut",e.target.value)}>
+              <option value="actif">Actif</option>
+              <option value="résilié">Résilié</option>
+              <option value="brouillon">Brouillon</option>
+            </select>
+          </div>
+          <div className="field"><label>Notes internes</label><textarea value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Contexte, historique…"/></div>
+        </div>
+
+        <button className="btn-finish" style={{width:"100%",marginBottom:24}} disabled={saving||!form.clientNom} onClick={saveContrat}>
+          {saving ? "Enregistrement…" : isEdit ? "Mettre à jour" : "Créer le contrat"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── VUE DÉTAIL ────────────────────────────────────────────────────────────
+
+  if (view === "detail" && selected) {
+    const sc        = selected.sc || computeStatut(selected);
+    // dateFin : info seulement, pas d'alerte
+    const sStyle    = statutStyle(sc);
+    const annuel    = selected.montantTTC && selected.nbPassages ? (parseFloat(selected.montantTTC) * parseInt(selected.nbPassages)).toFixed(2) : "—";
+    const { realises: pasRealises, attendus: pasAttendus } = passagesPeriode(selected);
+    const pct = Math.min(100, Math.round((pasRealises / pasAttendus) * 100));
+    const intervalMois = Math.round(12 / (parseInt(selected.nbPassages) || 4));
+    const nextDate  = nextPassageDate(selected);
+    const daysToNext = getDaysTo(nextDate);
+    const relances  = (selected.relances || []).sort((a,b) => b.date.localeCompare(a.date));
+
+    return (
+      <div className="container">
+        {confirmDelete && (
+          <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:"1rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Supprimer définitivement ce contrat ?</span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn-outline" onClick={()=>setConfirmDelete(false)}>Annuler</button>
+              <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteContrat}>Supprimer</button>
+            </div>
+          </div>
+        )}
+        <div className="page-header">
+          <button className="btn-back" onClick={() => { setView("list"); setConfirmDelete(false); }}>← Retour</button>
+          <h2>{selected.ref}</h2>
+          <span className="badge" style={{ background:sStyle.bg, color:sStyle.color }}>{sc}</span>
+          <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
+        </div>
+
+        {/* Client */}
+        <div className="card readonly">
+          <div className="card-title">Client</div>
+          <div className="info-row"><span>Nom</span><b>{selected.clientNom}</b></div>
+          {selected.clientResponsable && <div className="info-row"><span>Responsable</span><b>{selected.clientResponsable}</b></div>}
+          <div className="info-row"><span>Adresse siège</span><b>{selected.clientAdresse||"—"}</b></div>
+          {selected.adresseIntervention && <div className="info-row"><span>Intervention</span><b>{selected.adresseIntervention}</b></div>}
+          <div className="info-row"><span>Téléphone</span><b>{selected.clientTel||"—"}</b></div>
+          <div className="info-row"><span>Email</span><b>{selected.clientEmail||"—"}</b></div>
+        </div>
+
+        {/* Prestation */}
+        <div className="card readonly">
+          <div className="card-title">Prestation</div>
+          <div className="info-row"><span>Types</span><b>{(selected.prestations||[]).join(", ")||"—"}</b></div>
+          <div className="info-row"><span>Passages / an</span><b>{selected.nbPassages} (tous les ~{intervalMois} mois)</b></div>
+          <div className="info-row"><span>Montant / passage TTC</span><b style={{color:"#35B499"}}>{parseFloat(selected.montantTTC||0).toFixed(2)} €</b></div>
+          <div className="info-row"><span>Total annuel TTC</span><b style={{color:"#35B499"}}>{annuel} €</b></div>
+          <div className="info-row"><span>Frais déplacement</span><b>{selected.fraisDeplacement} €</b></div>
+          <div className="info-row"><span>Préavis résiliation</span><b>{selected.preavis} mois</b></div>
+        </div>
+
+        {/* Durée */}
+        <div className="card readonly">
+          <div className="card-title">Contrat</div>
+          <div className="info-row"><span>Signé le</span><b>{fmtDate(selected.dateSignature)}</b></div>
+          {selected.dateDebutClient && <div className="info-row"><span>Début relation client</span><b style={{color:"#35B499"}}>{fmtDate(selected.dateDebutClient)}</b></div>}
+          <div className="info-row"><span>Début engagement</span><b>{fmtDate(selected.dateDebut)}</b></div>
+          <div className="info-row"><span>Fin d'engagement 12 mois</span><b style={{color:"var(--color-text-secondary)"}}>{fmtDate(selected.dateFin)} <span style={{fontSize:11,fontStyle:"italic"}}>(le contrat reste actif au-delà)</span></b></div>
+        </div>
+
+        {/* Prochaine intervention */}
+        {nextDate && sc !== "résilié" && sc !== "expiré" && (
+          <div className="card" style={{
+            borderLeft: daysToNext !== null && daysToNext < 0
+              ? "3px solid #c0392b"
+              : daysToNext !== null && daysToNext <= RELANCE_ALERT_DAYS
+              ? "3px solid #8B6A4E"
+              : "none"
+          }}>
+            <div className="card-title">Prochaine intervention estimée</div>
+            <div className="info-row">
+              <span>Date estimée</span>
+              <b style={{color: daysToNext!==null&&daysToNext<0?"#c0392b":daysToNext!==null&&daysToNext<=RELANCE_ALERT_DAYS?"#8B6A4E":"#35B499", fontSize:15}}>
+                {fmtDate(nextDate)}
+              </b>
+            </div>
+            {daysToNext !== null && (
+              <div className="info-row">
+                <span>Statut</span>
+                <b style={{color:daysToNext<0?"#c0392b":daysToNext<=RELANCE_ALERT_DAYS?"#8B6A4E":"#35B499"}}>
+                  {daysToNext < 0
+                    ? `⚠️ En retard de ${Math.abs(daysToNext)} jour(s)`
+                    : daysToNext === 0
+                    ? "Aujourd'hui"
+                    : `Dans ${daysToNext} jour(s)`}
+                </b>
+              </div>
+            )}
+            {daysToNext !== null && daysToNext < 0 && (
+              <p style={{fontSize:12,color:"#c0392b",marginTop:6,fontWeight:500}}>
+                🔴 Passage en retard — à planifier et relancer le client
+              </p>
+            )}
+            {daysToNext !== null && daysToNext >= 0 && daysToNext <= RELANCE_ALERT_DAYS && (
+              <p style={{fontSize:12,color:"#8B6A4E",marginTop:6,fontWeight:500}}>
+                ⚠️ Intervention imminente — pensez à contacter le client
+              </p>
+            )}
+            <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:6,fontStyle:"italic"}}>
+              Calculé depuis le dernier passage · intervalle {intervalMois} mois
+            </p>
+          </div>
+        )}
+
+        {/* Passages */}
+        <div className="card">
+          <div className="card-title">Passages effectués</div>
+          <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:6}}>
+            <div style={{height:4,background:"#35B499",borderRadius:2,width:pct+"%",transition:"width .3s"}}/>
+          </div>
+          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>
+            <b style={{color:pasRealises>=pasAttendus?"#35B499":"var(--color-text-primary)"}}>{pasRealises} / {pasAttendus}</b> passages réalisés sur la période en cours
+          </p>
+          {(() => {
+            const { debut, fin } = passagesPeriode(selected);
+            const total = (selected.passages||[]).length;
+            return (
+              <p style={{fontSize:11,color:"#888",marginBottom:14,fontStyle:"italic"}}>
+                Période en cours : {debut?fmtDate(debut):"—"} → {fin?fmtDate(fin):"—"}
+                {" · "}{total} passage{total>1?"s":""} au total depuis le début
+              </p>
+            );
+          })()}
+          {(selected.passages||[]).length===0 && (
+            <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12,fontStyle:"italic"}}>Aucun passage enregistré.</p>
+          )}
+          {(selected.passages||[]).map((p,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:"#35B499",flexShrink:0,display:"inline-block"}}/>
+              <span style={{fontSize:13,flex:1}}>{fmtDate(p.date)}</span>
+              {sc!=="résilié" && (
+                <button onClick={()=>removePassage(i)} style={{background:"none",border:"none",color:"#c0392b",cursor:"pointer",fontSize:12,padding:"2px 6px"}}>Supprimer</button>
+              )}
+            </div>
+          ))}
+          {sc!=="résilié" && (
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:14}}>
+              <input type="date" value={newPassage} onChange={e=>setNewPassage(e.target.value)}
+                style={{width:"100%",padding:"10px",fontSize:14,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
+              <button className="btn-primary" style={{width:"100%"}} onClick={addPassage} disabled={!newPassage}>+ Ajouter le passage</button>
+            </div>
+          )}
+        </div>
+
+        {/* Relances */}
+        <div className="card">
+          <div className="card-title">Relances client</div>
+          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:14}}>
+            Historique des contacts effectués pour planifier les passages.
+          </p>
+          {relances.length===0 && (
+            <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12,fontStyle:"italic"}}>Aucune relance enregistrée.</p>
+          )}
+          {relances.map((r,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:"#8B6A4E",flexShrink:0,display:"inline-block",marginTop:5}}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:500,color:"var(--color-text-primary)"}}>{fmtDate(r.date)}</div>
+                {r.note && <div style={{fontSize:12,color:"var(--color-text-secondary)",marginTop:2}}>{r.note}</div>}
+              </div>
+              <button onClick={()=>removeRelance(i)} style={{background:"none",border:"none",color:"#c0392b",cursor:"pointer",fontSize:12,padding:"2px 6px",flexShrink:0}}>Supprimer</button>
+            </div>
+          ))}
+          {sc!=="résilié" && (
+            <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+              <div>
+                <input type="date" value={newRelanceDate} onChange={e=>setNewRelanceDate(e.target.value)}
+                  style={{width:"100%",padding:"10px",fontSize:14,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
+              </div>
+              <input type="text" placeholder="Note (optionnel) — ex: Contact par téléphone, RDV pris pour le 12/05" value={newRelanceNote} onChange={e=>setNewRelanceNote(e.target.value)}
+                style={{width:"100%",padding:"8px 10px",fontSize:13,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box"}}/>
+              <button className="btn-outline" onClick={addRelance} disabled={!newRelanceDate} style={{width:"100%"}}>
+                + Enregistrer une relance
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        {selected.notes && (
+          <div className="card readonly">
+            <div className="card-title">Notes internes</div>
+            <p style={{fontSize:13,lineHeight:1.6}}>{selected.notes}</p>
+          </div>
+        )}
+
+        {/* Actions */}
+        {confirmResilier && (
+          <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la résiliation du contrat ?</span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn-outline" onClick={()=>setConfirmResilier(false)}>Annuler</button>
+              <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={()=>{resilierContrat();setConfirmResilier(false);}}>Résilier</button>
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:8,marginBottom:12}}>
+          <button className="btn-primary" style={{flex:1}} onClick={()=>generatePDF(selected)}>📄 Télécharger PDF</button>
+          <button className="btn-outline" onClick={()=>{setForm({...selected});setIsEdit(true);setView("form");}}>Modifier</button>
+          {sc !== "résilié" && (
+            <button onClick={()=>setConfirmResilier(true)}
+              style={{background:"transparent",border:"0.5px solid #f5c6cb",color:"#c0392b",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:500}}>
+              Résilier
+            </button>
+          )}
+        </div>
+
+      </div>
+    );
+  }
+
+  // ── VUE LISTE ─────────────────────────────────────────────────────────────
+
+  const counts = {
+    tous:      contrats.length,
+    actif:     contrats.filter(c=>c.sc==="actif").length,
+    resilie:   contrats.filter(c=>c.sc==="résilié").length,
+    brouillon: contrats.filter(c=>c.sc==="brouillon").length,
+  };
+
+  // Contrats avec prochaine intervention dans <= 15j
+  const aRelancer = contrats.filter(c => {
+    if (c.sc==="résilié") return false;
+    const d = getDaysTo(nextPassageDate(c));
+    return d!==null && d<=RELANCE_ALERT_DAYS;
+  }).length;
+
+  // CA annuel total des contrats actifs
+  const caAnnuel = contrats
+    .filter(c=>c.sc==="actif")
+    .reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+
+  const FILTERS = [
+    ["tous","Tous"],["actif","Actifs"],
+    ["resilie","Résiliés"],["brouillon","Brouillons"],
+  ];
+
+  const filtered = contrats.filter(c => {
+    if (filter==="tous")    return true;
+    if (filter==="resilie") return c.sc==="résilié";
+    return c.sc===filter;
+  });
+
+  // CSS tableau injecté (cohérence avec AdminDashboard)
+  const TABLE_CSS = `
+    .ctr-table-wrap{overflow-x:auto}
+    .ctr-table{width:100%;border-collapse:collapse;font-size:12px;min-width:700px}
+    .ctr-table th{text-align:left;font-size:9.5px;font-weight:500;color:#888;text-transform:uppercase;letter-spacing:.8px;padding:8px 14px;border-bottom:.5px solid #e8e5e0;white-space:nowrap;background:white}
+    .ctr-table td{padding:10px 14px;border-bottom:.5px solid #f0ede8;color:var(--color-text-primary);vertical-align:middle}
+    .ctr-table tr:last-child td{border-bottom:none}
+    .ctr-table tr:hover td{background:#fafaf8;cursor:pointer}
+    .ctr-ref{font-size:11px;color:#35B499;font-weight:600}
+    .ctr-badge{font-size:10px;font-weight:500;padding:3px 9px;border-radius:20px;white-space:nowrap;display:inline-block}
+    .ctr-badge.actif{background:#e1f5ee;color:#0e6b50}
+    .ctr-badge.renouveler{background:#f5e8d8;color:#6b4a31}
+    .ctr-badge.expire,.ctr-badge.resilie{background:#fde8e8;color:#9b2c2c}
+    .ctr-badge.brouillon{background:#f0f0f0;color:#888}
+    .ctr-prog{height:4px;background:#f0ede8;border-radius:2px;overflow:hidden;width:70px}
+    .ctr-prog-fill{height:100%;border-radius:2px;background:#35B499}
+    .ctr-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+    .ctr-kpi{background:white;border-radius:10px;padding:14px 16px;border:.5px solid #e0ddd8;position:relative;overflow:hidden;cursor:pointer}
+    .ctr-kpi:hover{box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    .ctr-kpi-accent{position:absolute;top:0;left:0;right:0;height:3px}
+    .ctr-kpi-label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:500}
+    .ctr-kpi-val{font-size:26px;font-weight:700;color:#1a1a1a;letter-spacing:-1px;margin:0;line-height:1}
+    .ctr-kpi-sub{font-size:10px;color:#888;margin:4px 0 0}
+    .ctr-panel{background:white;border-radius:10px;border:.5px solid #e0ddd8;overflow:hidden}
+    .ctr-panel-head{padding:12px 16px;border-bottom:.5px solid #e8e5e0;display:flex;align-items:center;gap:8px}
+    .ctr-panel-title{font-size:12px;font-weight:600;color:#1a1a1a;margin:0}
+    .ctr-panel-count{font-size:11px;color:#888;margin-left:auto}
+    @media(max-width:768px){.ctr-kpi-row{grid-template-columns:repeat(2,1fr)!important}.ctr-kpi-val{font-size:20px}}
+  `;
+
+  const badgeClass = (sc) => ({
+    "actif":"actif","résilié":"resilie","brouillon":"brouillon"
+  }[sc]||"brouillon");
+
+  return (
+    <div style={{padding:"22px 24px"}}>
+
+      {/* KPI */}
+      <div className="ctr-kpi-row" style={{gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))'}}>
+        <div className="ctr-kpi" onClick={()=>setFilter("actif")}>
+          <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
+          <p className="ctr-kpi-label">Contrats actifs</p>
+          <p className="ctr-kpi-val">{counts.actif}</p>
+          <p className="ctr-kpi-sub" style={{color:"#1a7a65"}}>sur {counts.tous} au total</p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>{}}>
+          <div className="ctr-kpi-accent" style={{background:aRelancer>0?"#8B6A4E":"#35B499"}}/>
+          <p className="ctr-kpi-label">Passages à planifier</p>
+          <p className="ctr-kpi-val">{aRelancer}</p>
+          <p className="ctr-kpi-sub" style={{color:aRelancer>0?"#8B6A4E":"#888"}}>
+            {aRelancer>0?"Relances à faire":"À jour"}
+          </p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>setFilter("resilie")}>
+          <div className="ctr-kpi-accent" style={{background:"#888"}}/>
+          <p className="ctr-kpi-label">Résiliés</p>
+          <p className="ctr-kpi-val">{counts.resilie}</p>
+          <p className="ctr-kpi-sub" style={{color:"#888"}}>contrats terminés</p>
+        </div>
+        <div className="ctr-kpi" onClick={()=>{}}>
+          <div className="ctr-kpi-accent" style={{background:"#35B499"}}/>
+          <p className="ctr-kpi-label">CA annuel contrats</p>
+          <p className="ctr-kpi-val" style={{fontSize:18}}>{caAnnuel.toFixed(0)} €</p>
+          <p className="ctr-kpi-sub">TTC — contrats actifs</p>
+        </div>
+      </div>
+
+      {/* Filtres + bouton */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+        {FILTERS.map(([key,label])=>{
+          const active=filter===key, cnt=counts[key];
+          if(cnt===0&&key!=="tous"&&key!==filter) return null;
+          return(
+            <div key={key} onClick={()=>setFilter(key)}
+              style={{padding:"5px 14px",borderRadius:20,fontSize:12,cursor:"pointer",border:".5px solid #e0ddd8",
+                background:active?(key==="renouveler"?"#f5e8d8":key==="expire"||key==="resilie"?"#fde8e8":"#e1f5ee"):"#f5f5f2",
+                color:active?(key==="renouveler"?"#6b4a31":key==="expire"||key==="resilie"?"#9b2c2c":"#0e6b50"):"#888"}}>
+              {label} ({cnt})
+            </div>
+          );
+        })}
+        <button className="btn-primary" style={{marginLeft:"auto"}}
+          onClick={()=>{setForm({...EMPTY_FORM,dateSignature:todayStr(),dateDebut:todayStr()});setIsEdit(false);setView("form");}}>
+          + Nouveau contrat
+        </button>
+      </div>
+
+      {/* Tableau */}
+      <div className="ctr-panel">
+        <div className="ctr-panel-head">
+          <span className="ctr-panel-title">Contrats d'intervention</span>
+          <span className="ctr-panel-count">{filtered.length} contrat{filtered.length!==1?"s":""}</span>
+        </div>
+        {filtered.length===0 ? (
+          <div style={{padding:"24px",textAlign:"center",fontSize:13,color:"#aaa"}}>Aucun contrat dans cette catégorie.</div>
+        ) : (
+          <div className="ctr-table-wrap">
+            <table className="ctr-table">
+              <thead>
+                <tr>
+                  <th>Référence</th>
+                  <th>Client</th>
+                  <th>Prestations</th>
+                  <th>Passages</th>
+                  <th>Montant TTC/an</th>
+                  <th>Prochaine intervention</th>
+                  <th>Dernière relance</th>
+                  <th>Échéance</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c=>{
+                  const next        = nextPassageDate(c);
+                  const daysNext    = getDaysTo(next);
+
+                  const alert       = daysNext!==null&&(daysNext<0||(daysNext<=RELANCE_ALERT_DAYS&&c.sc!=="résilié"&&c.sc!=="expiré"));
+                  const annuel      = c.montantTTC&&c.nbPassages?(parseFloat(c.montantTTC)*parseInt(c.nbPassages)).toFixed(2):null;
+                  const { realises: pRealises, attendus: pAttendus } = passagesPeriode(c);
+                  const pct = Math.min(100, Math.round((pRealises / pAttendus) * 100));
+                  const lastRelance = (c.relances||[]).length>0?[...(c.relances||[])].sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+                  const sStyle      = statutStyle(c.sc);
+                  return(
+                    <tr key={c.id} onClick={()=>{setSelected(c);setView("detail");}}>
+                      <td><span className="ctr-ref">{c.ref}</span></td>
+                      <td>
+                        <span style={{fontWeight:500,display:"block"}}>{c.clientNom}</span>
+                        {c.clientResponsable&&<span style={{fontSize:10,color:"#888"}}>{c.clientResponsable}</span>}
+                      </td>
+                      <td style={{fontSize:11,color:"#555",maxWidth:140}}>
+                        {(c.prestations||[]).join(", ")||"—"}
+                      </td>
+                      <td>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div className="ctr-prog"><div className="ctr-prog-fill" style={{width:pct+"%"}}/></div>
+                          <span style={{fontSize:11,color:pRealises>=pAttendus?"#35B499":"#888",whiteSpace:"nowrap",fontWeight:pRealises>=pAttendus?500:400}}>{pRealises}/{pAttendus}</span>
+                        </div>
+                      </td>
+                      <td style={{fontWeight:500,color:"#35B499",whiteSpace:"nowrap"}}>
+                        {annuel?annuel+" €":"—"}
+                      </td>
+                      <td style={{whiteSpace:"nowrap"}}>
+                        {next?(
+                          <span style={{color:daysNext!==null&&daysNext<0?"#c0392b":alert?"#8B6A4E":"var(--color-text-primary)",fontWeight:daysNext!==null&&(daysNext<0||alert)?600:400}}>
+                            {fmtDate(next)}
+                            {daysNext!==null&&daysNext<0&&<span style={{display:"block",fontSize:10,color:"#c0392b"}}>🔴 retard {Math.abs(daysNext)}j</span>}
+                            {daysNext!==null&&daysNext>=0&&alert&&<span style={{display:"block",fontSize:10,color:"#8B6A4E"}}>⚠ dans {daysNext}j</span>}
+                          </span>
+                        ):"—"}
+                      </td>
+                      <td style={{fontSize:11,color:"#888",maxWidth:160}}>
+                        {lastRelance?(
+                          <span>
+                            {fmtDate(lastRelance.date)}
+                            {lastRelance.note&&<span style={{display:"block",fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{lastRelance.note}</span>}
+                          </span>
+                        ):<span style={{color:"#ccc"}}>—</span>}
+                      </td>
+                      <td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>
+                        {fmtDate(c.dateFin)}
+                        <span style={{display:"block",fontSize:10,fontStyle:"italic",color:"#bbb"}}>fin engagement</span>
+                      </td>
+                      <td>
+                        <span className={`ctr-badge ${badgeClass(c.sc)}`}>{c.sc}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
