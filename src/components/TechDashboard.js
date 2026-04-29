@@ -20,7 +20,6 @@ export default function TechDashboard({ user }) {
   const [sigTech, setSigTech] = useState(null);
   const [sigClient, setSigClient] = useState(null);
   const [signataireNom, setSignataireNom] = useState("");
-  const [clientAbsent, setClientAbsent] = useState(false);
   const [emailStatus, setEmailStatus] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
@@ -48,7 +47,6 @@ export default function TechDashboard({ user }) {
     setSigTech(b.signatureTech || null);
     setSigClient(b.signatureClient || null);
     setSignataireNom(b.signataire || b.clientNom + " " + b.clientPrenom);
-    setClientAbsent(b.clientAbsent || false);
     setEmailStatus("");
     setView("bon");
   };
@@ -96,7 +94,6 @@ export default function TechDashboard({ user }) {
       obsClient,
       signatureTech: sigTech,
       signatureClient: sigClient,
-      clientAbsent: clientAbsent,
       geoFin: geo,
       signataire: signataireNom || selected.signataire || "",
       checklist: checklist
@@ -117,7 +114,7 @@ export default function TechDashboard({ user }) {
 
   const sauvegarder = async () => {
     setSaving(true);
-    await updateDoc(doc(db, "bons", selected.id), { obsCocon, obsClient, signatureTech: sigTech, signatureClient: sigClient, signataire: signataireNom, clientAbsent });
+    await updateDoc(doc(db, "bons", selected.id), { obsCocon, obsClient, signatureTech: sigTech, signatureClient: sigClient, signataire: signataireNom });
     setSaving(false);
   };
 
@@ -259,7 +256,7 @@ export default function TechDashboard({ user }) {
     { id: "produits", label: "Produits utilisés rangés / sécurisés", required: true },
     { id: "consignes", label: "Client informé des consignes post-intervention", required: true },
     { id: "photos", label: "Photos prises", required: false },
-    { id: "signature", label: "Bon signé par le client", required: !clientAbsent },
+    { id: "signature", label: "Bon signé par le client", required: true },
   ];
 
   const checklistValid = CHECKLIST.filter(i => i.required).every(i => checklist[i.id]);
@@ -391,7 +388,18 @@ export default function TechDashboard({ user }) {
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
         <div className="info-row"><span>Téléphone</span><b>{selected.clientTel || "—"}</b></div>
         <div className="info-row"><span>Email</span><b>{selected.clientEmail || "—"}</b></div>
-        <div className="info-row"><span>Adresse</span><b>{selected.clientAdresse}</b></div>
+        <div className="info-row"><span>Adresse</span><b>
+          {selected.adresseIntervention || selected.clientAdresse ? (
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention || selected.clientAdresse)}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer"}}
+            >
+              {selected.adresseIntervention || selected.clientAdresse} 📍
+            </a>
+          ) : "—"}
+        </b></div>
       </div>
 
       <div className="card readonly">
@@ -455,55 +463,32 @@ export default function TechDashboard({ user }) {
 
           <div className="card">
             <div className="card-title">Signatures</div>
-
-            {/* Case client absent */}
-            {selected.statut !== "terminé" && (
-              <div
-                onClick={() => { setClientAbsent(a => !a); if (!clientAbsent) setSigClient(null); }}
-                style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:14,borderRadius:8,cursor:"pointer",background:clientAbsent?"#fff8f0":"var(--color-background-secondary)",border:clientAbsent?"1px solid #e8c9b8":"0.5px solid var(--color-border-tertiary)"}}>
-                <div style={{width:20,height:20,borderRadius:5,border:"2px solid #8B6A4E",background:clientAbsent?"#8B6A4E":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                  {clientAbsent && <span style={{color:"white",fontSize:12,fontWeight:"bold"}}>✓</span>}
-                </div>
-                <div>
-                  <span style={{fontSize:13,fontWeight:500,color:clientAbsent?"#6b4a31":"var(--color-text-primary)"}}>Client absent lors de l'intervention</span>
-                  {clientAbsent && <p style={{fontSize:11,color:"#8B6A4E",margin:"2px 0 0"}}>La signature client ne sera pas requise</p>}
-                </div>
-              </div>
-            )}
-            {selected.statut === "terminé" && selected.clientAbsent && (
-              <div style={{background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:8,padding:"8px 12px",marginBottom:12}}>
-                <p style={{fontSize:12,color:"#6b4a31",margin:0}}>⚠️ Client absent lors de l'intervention — pas de signature client</p>
-              </div>
-            )}
-
             <div className="row2">
               <div>
                 <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Collaborateur</p>
                 {sigTech ? <img src={sigTech} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
                 {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("tech")}>Signer</button>}
               </div>
-              {!clientAbsent && (
-                <div>
-                  <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
-                  {selected.statut !== "terminé" && (
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:11,color:"var(--color-text-secondary)",display:"block",marginBottom:3}}>Nom du signataire</label>
-                      <input
-                        type="text"
-                        placeholder={selected.clientNom + " " + selected.clientPrenom}
-                        value={signataireNom || selected.clientNom + " " + selected.clientPrenom}
-                        onChange={e => setSignataireNom(e.target.value)}
-                        style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
-                      />
-                    </div>
-                  )}
-                  {selected.statut === "terminé" && selected.signataire && (
-                    <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>
-                  )}
-                  {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
-                  {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
-                </div>
-              )}
+              <div>
+                <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
+                {selected.statut !== "terminé" && (
+                  <div style={{marginBottom:6}}>
+                    <label style={{fontSize:11,color:"var(--color-text-secondary)",display:"block",marginBottom:3}}>Nom du signataire</label>
+                    <input
+                      type="text"
+                      placeholder={selected.clientNom + " " + selected.clientPrenom}
+                      value={signataireNom || selected.clientNom + " " + selected.clientPrenom}
+                      onChange={e => setSignataireNom(e.target.value)}
+                      style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
+                    />
+                  </div>
+                )}
+                {selected.statut === "terminé" && selected.signataire && (
+                  <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>
+                )}
+                {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}} /> : <div className="sig-placeholder-sm">Non signé</div>}
+                {selected.statut !== "terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
+              </div>
             </div>
           </div>
 
@@ -514,12 +499,12 @@ export default function TechDashboard({ user }) {
           )}
           {selected.statut === "en cours" && (
             <div>
-              {(!sigTech || (!clientAbsent && !sigClient)) && (
+              {(!sigTech || !sigClient) && (
                 <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>
-                  {clientAbsent ? "⚠️ La signature du collaborateur est requise" : "⚠️ Les deux signatures sont requises pour continuer"}
+                  ⚠️ Les deux signatures sont requises pour continuer
                 </p>
               )}
-              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech || (!clientAbsent && !sigClient)) ? 0.4 : 1}} disabled={!sigTech || (!clientAbsent && !sigClient)} onClick={() => { sauvegarder(); setShowChecklist(true); }}>
+              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech || !sigClient) ? 0.4 : 1}} disabled={!sigTech || !sigClient} onClick={() => { sauvegarder(); setShowChecklist(true); }}>
                 Valider la checklist →
               </button>
             </div>
