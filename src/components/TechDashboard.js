@@ -394,7 +394,8 @@ export default function TechDashboard({ user }) {
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention || selected.clientAdresse)}`}
               target="_blank"
               rel="noreferrer"
-              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer"}}
+              style={{color:"#2a9d8f", textDecoration:"underline", cursor:"pointer", pointerEvents:"auto"}}
+              onClick={e => e.stopPropagation()}
             >
               {selected.adresseIntervention || selected.clientAdresse} 📍
             </a>
