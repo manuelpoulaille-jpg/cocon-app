@@ -11,8 +11,8 @@ const DRIVE_WEBHOOK    = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlY
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const fmtTs  = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
-const today  = () => new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
+const fmtTs = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
+const todayStr = () => new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
 
 const extractVille = (adresse) => {
   if (!adresse) return "";
@@ -29,8 +29,8 @@ const getTwoWeekRange = () => {
   mon.setHours(0,0,0,0);
   const end  = new Date(mon);
   end.setDate(mon.getDate() + 13);
-  const fmtD = (d) => d.toLocaleDateString("fr-CA");
-  return { start: fmtD(mon), end: fmtD(end) };
+  const fmt = (d) => d.toLocaleDateString("fr-CA");
+  return { start: fmt(mon), end: fmt(end) };
 };
 
 const getWeekDays = (offset = 0) => {
@@ -47,74 +47,60 @@ const getWeekDays = (offset = 0) => {
   });
 };
 
-const fmtDay = (d) => d.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"short" });
 const fmtDateKey = (d) => d.toLocaleDateString("fr-CA");
-const isToday   = (d) => fmtDateKey(d) === today();
+const fmtDayLabel = (d) => d.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"short" });
+const isToday = (d) => fmtDateKey(d) === todayStr();
 
-const statutColor = (s) => ({ planifié:"#d4f0ea","en cours":"#e8c9b8",terminé:"#35B499" }[s] || "#eee");
-const statutText  = (s) => ({ planifié:"#1a7a65","en cours":"#6b4a31",terminé:"white"   }[s] || "#333");
-
-const calcDuree = (arrivee, fin) => {
-  if (!arrivee || !fin) return "—";
-  const diff = fin.toDate() - arrivee.toDate();
+const calcDuree = (a, f) => {
+  if (!a || !f) return "—";
+  const diff = f.toDate() - a.toDate();
   const h = Math.floor(diff / 3600000);
   const m = Math.floor((diff % 3600000) / 60000);
   return h > 0 ? `${h}h${m.toString().padStart(2,"0")}` : `${m} min`;
 };
 
+const statutColor = (s) => ({ planifié:"#d4f0ea","en cours":"#e8c9b8",terminé:"#35B499" }[s] || "#eee");
+const statutText  = (s) => ({ planifié:"#1a7a65","en cours":"#6b4a31",terminé:"white"   }[s] || "#333");
+
 const CHECKLIST_ITEMS = [
-  { id:"nettoyage", label:"Nettoyage du chantier effectué",              required:true  },
-  { id:"outils",    label:"Outils et matériel récupérés",                required:true  },
-  { id:"produits",  label:"Produits utilisés rangés / sécurisés",        required:true  },
-  { id:"consignes", label:"Client informé des consignes post-intervention", required:true },
-  { id:"photos",    label:"Photos prises",                               required:false },
-  { id:"signature", label:"Bon signé par le client",                     required:true  },
+  { id:"nettoyage", label:"Nettoyage du chantier effectué",               required:true  },
+  { id:"outils",    label:"Outils et matériel récupérés",                 required:true  },
+  { id:"produits",  label:"Produits utilisés rangés / sécurisés",         required:true  },
+  { id:"consignes", label:"Client informé des consignes post-intervention",required:true  },
+  { id:"photos",    label:"Photos prises",                                required:false },
+  { id:"signature", label:"Bon signé par le client",                      required:true  },
 ];
 
-// ── Styles topbar / nav ───────────────────────────────────────────────────────
-
-const S = {
-  root: { display:"flex", flexDirection:"column", minHeight:"100vh", background:"#f0ede8" },
-  topbar: { background:"#111d1b", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 },
-  logo:   { fontSize:17, fontWeight:700, color:"#35B499", letterSpacing:"-0.5px" },
-  topRight:{ display:"flex", alignItems:"center", gap:8 },
-  userName:{ fontSize:11, color:"rgba(255,255,255,0.55)" },
-  avatar:  { width:28, height:28, borderRadius:"50%", background:"#35B499", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"white", flexShrink:0 },
-  iconBtn: { width:30, height:30, borderRadius:8, border:"0.5px solid rgba(255,255,255,0.12)", background:"rgba(255,255,255,0.06)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:14, color:"rgba(255,255,255,0.55)", flexShrink:0 },
-  iconBtnRed: { border:"0.5px solid rgba(231,76,60,0.35)", color:"rgba(231,76,60,0.75)" },
-  content:{ flex:1, overflowY:"auto", padding:"14px" },
-  bottomNav: { display:"flex", background:"white", borderTop:"0.5px solid #e0ddd8", flexShrink:0 },
-  navTab:  { flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"10px 8px 8px", gap:3, cursor:"pointer", border:"none", background:"transparent" },
-  navDot:  { width:4, height:4, borderRadius:"50%", background:"#35B499", marginTop:2 },
-  kpiRow:  { display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 },
-  kpi:     { background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:"10px", textAlign:"center", position:"relative", overflow:"hidden" },
-  kpiAccent:{ position:"absolute", top:0, left:0, right:0, height:3 },
-};
+const KPI = ({ label, value, color }) => (
+  <div style={{background:"white",borderRadius:10,border:"0.5px solid #e0ddd8",padding:"10px",textAlign:"center",position:"relative",overflow:"hidden"}}>
+    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:color}}/>
+    <div style={{fontSize:22,fontWeight:800,color:"#1a1a1a",lineHeight:1}}>{value}</div>
+    <div style={{fontSize:10,color:"#888",marginTop:4}}>{label}</div>
+  </div>
+);
 
 // ── Composant ─────────────────────────────────────────────────────────────────
 
-export default function TechDashboard({ user, onLogout }) {
-  const [tab,         setTab]         = useState("interventions");
-  const [bons,        setBons]        = useState([]);
-  const [planBons,    setPlanBons]    = useState([]);
-  const [view,        setView]        = useState("list");
-  const [selected,    setSelected]    = useState(null);
-  const [obsCocon,    setObsCocon]    = useState("");
-  const [obsClient,   setObsClient]   = useState("");
-  const [saving,      setSaving]      = useState(false);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [sigMode,     setSigMode]     = useState(null);
-  const [sigTech,     setSigTech]     = useState(null);
-  const [sigClient,   setSigClient]   = useState(null);
-  const [signataireNom, setSignataireNom] = useState("");
-  const [emailStatus, setEmailStatus] = useState("");
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showChecklist, setShowChecklist] = useState(false);
-  const [checklist,   setChecklist]   = useState({});
+export default function TechDashboard({ user, tab = "interventions", refreshTrigger = 0 }) {
+  const [bons,          setBons]         = useState([]);
+  const [planBons,      setPlanBons]     = useState([]);
+  const [view,          setView]         = useState("list");
+  const [selected,      setSelected]     = useState(null);
+  const [obsCocon,      setObsCocon]     = useState("");
+  const [obsClient,     setObsClient]    = useState("");
+  const [saving,        setSaving]       = useState(false);
+  const [sigMode,       setSigMode]      = useState(null);
+  const [sigTech,       setSigTech]      = useState(null);
+  const [sigClient,     setSigClient]    = useState(null);
+  const [signataireNom, setSignataireNom]= useState("");
+  const [emailStatus,   setEmailStatus]  = useState("");
+  const [showSuccess,   setShowSuccess]  = useState(false);
+  const [showChecklist, setShowChecklist]= useState(false);
+  const [checklist,     setChecklist]    = useState({});
   const canvasRef = useRef(null);
   const drawing   = useRef(false);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [refreshTrigger]);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -123,29 +109,23 @@ export default function TechDashboard({ user, onLogout }) {
   };
 
   const fetchBons = async () => {
-    const td   = today();
+    const td   = todayStr();
     const snap = await getDocs(collection(db,"bons"));
     const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
-    const filtered = all
-      .filter(b => b.datePrevue === td && (b.techId === user.uid || b.techNom === user.displayName || b.techNom === "Equipe"))
-      .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
-    setBons(filtered);
+    setBons(
+      all.filter(b => b.datePrevue === td && (b.techId === user.uid || b.techNom === "Equipe"))
+         .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""))
+    );
   };
 
   const fetchPlanningBons = async () => {
     const { start, end } = getTwoWeekRange();
     const snap = await getDocs(collection(db,"bons"));
     const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
-    const filtered = all
-      .filter(b => b.datePrevue >= start && b.datePrevue <= end && (b.techId === user.uid || b.techNom === user.displayName || b.techNom === "Equipe"))
-      .sort((a,b) => (a.datePrevue+a.heurePrevue||"").localeCompare(b.datePrevue+b.heurePrevue||""));
-    setPlanBons(filtered);
-  };
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchAll();
-    setRefreshing(false);
+    setPlanBons(
+      all.filter(b => b.datePrevue >= start && b.datePrevue <= end && (b.techId === user.uid || b.techNom === "Equipe"))
+         .sort((a,b) => (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||"")))
+    );
   };
 
   // ── Bon actions ────────────────────────────────────────────────────────────
@@ -175,8 +155,7 @@ export default function TechDashboard({ user, onLogout }) {
     const geo = await getGeoLocation();
     const now = Timestamp.now();
     await updateDoc(doc(db,"bons",selected.id), { heureArrivee:now, statut:"en cours", geoArrivee:geo });
-    const updated = { ...selected, heureArrivee:now, statut:"en cours", geoArrivee:geo };
-    setSelected(updated);
+    setSelected({ ...selected, heureArrivee:now, statut:"en cours", geoArrivee:geo });
     fetchAll();
     setSaving(false);
   };
@@ -265,7 +244,7 @@ export default function TechDashboard({ user, onLogout }) {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+      ctx.strokeStyle="#1a1a1a"; ctx.lineWidth=2.5; ctx.lineCap="round";
       const getPos = (e) => {
         const r = canvas.getBoundingClientRect();
         const src = e.touches ? e.touches[0] : e;
@@ -289,87 +268,42 @@ export default function TechDashboard({ user, onLogout }) {
     setSigMode(null);
   };
 
-  // ── Topbar ─────────────────────────────────────────────────────────────────
-
-  const initiales = (user?.displayName||user?.email||"?").slice(0,2).toUpperCase();
-  const prenom    = user?.displayName?.split(" ")[0] || "Tech";
-
-  const Topbar = () => (
-    <div style={S.topbar}>
-      <div style={S.logo}>Cocon+</div>
-      <div style={S.topRight}>
-        <div style={{...S.iconBtn, fontSize:16}} onClick={handleRefresh} title="Rafraîchir">
-          <span style={{display:"inline-block", transition:"transform .4s", transform:refreshing?"rotate(360deg)":"rotate(0deg)"}}>↻</span>
-        </div>
-        <div style={S.userName}>{prenom}</div>
-        <div style={S.avatar}>{initiales}</div>
-        {onLogout && (
-          <div style={{...S.iconBtn,...S.iconBtnRed}} onClick={onLogout} title="Déconnexion">⏻</div>
-        )}
-      </div>
-    </div>
-  );
-
-  // ── Bottom nav ─────────────────────────────────────────────────────────────
-
-  const BottomNav = () => (
-    <div style={S.bottomNav}>
-      {[
-        { key:"interventions", label:"Interventions", icon:"📋" },
-        { key:"planning",      label:"Planning",      icon:"📅" },
-      ].map(({ key, label, icon }) => {
-        const active = tab === key;
-        return (
-          <button key={key} style={S.navTab} onClick={() => { setTab(key); setView("list"); }}>
-            <span style={{ fontSize:20, color:active?"#35B499":"#aaa" }}>{icon}</span>
-            <span style={{ fontSize:9, fontWeight:active?600:400, color:active?"#35B499":"#aaa" }}>{label}</span>
-            {active && <div style={S.navDot}/>}
-          </button>
-        );
-      })}
-    </div>
-  );
-
   // ══════════════════════════════════════════════════════════════════════════
   // VUE : Checklist
   // ══════════════════════════════════════════════════════════════════════════
 
   if (showChecklist) return (
-    <div style={S.root}>
-      <Topbar/>
-      <div style={S.content}>
-        <div className="page-header">
-          <button className="btn-back" onClick={() => setShowChecklist(false)}>← Retour</button>
-          <h2>Checklist de fin de chantier</h2>
-        </div>
-        <div className="card">
-          <div className="card-title">Vérifications avant clôture</div>
-          <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:"1rem"}}>
-            <div style={{height:4,background:"#35B499",borderRadius:2,width:(Object.values(checklist).filter(Boolean).length/CHECKLIST_ITEMS.length*100)+"%",transition:"width .3s"}}/>
-          </div>
-          {CHECKLIST_ITEMS.map(item => (
-            <div key={item.id} onClick={() => setChecklist(c => ({...c,[item.id]:!c[item.id]}))}
-              style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
-              <div style={{width:24,height:24,borderRadius:6,border:"2px solid #35B499",background:checklist[item.id]?"#35B499":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                {checklist[item.id] && <span style={{color:"white",fontSize:13,fontWeight:"bold"}}>✓</span>}
-              </div>
-              <span style={{fontSize:14,color:checklist[item.id]?"var(--color-text-secondary)":"var(--color-text-primary)",textDecoration:checklist[item.id]?"line-through":"none",flex:1}}>
-                {item.label}
-              </span>
-              {!item.required && <span style={{fontSize:10,color:"#888",background:"var(--color-background-secondary)",padding:"2px 8px",borderRadius:20,flexShrink:0}}>Optionnel</span>}
-            </div>
-          ))}
-          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginTop:"1rem",fontStyle:"italic"}}>Les points obligatoires doivent être cochés pour terminer.</p>
-        </div>
-        {!CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id]) && (
-          <p style={{color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:8}}>⚠️ Veuillez cocher tous les points obligatoires</p>
-        )}
-        <button className="btn-finish" style={{width:"100%",opacity:CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id])?1:0.4}}
-          disabled={saving||!CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id])} onClick={terminer}>
-          {saving?"Finalisation…":"✅ Terminer le chantier"}
-        </button>
+    <div className="container">
+      <div className="page-header">
+        <button className="btn-back" onClick={() => setShowChecklist(false)}>← Retour</button>
+        <h2>Checklist de fin de chantier</h2>
       </div>
-      <BottomNav/>
+      <div className="card">
+        <div className="card-title">Vérifications avant clôture</div>
+        <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:"1rem"}}>
+          <div style={{height:4,background:"#35B499",borderRadius:2,width:(Object.values(checklist).filter(Boolean).length/CHECKLIST_ITEMS.length*100)+"%",transition:"width .3s"}}/>
+        </div>
+        {CHECKLIST_ITEMS.map(item => (
+          <div key={item.id} onClick={() => setChecklist(c => ({...c,[item.id]:!c[item.id]}))}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+            <div style={{width:24,height:24,borderRadius:6,border:"2px solid #35B499",background:checklist[item.id]?"#35B499":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+              {checklist[item.id] && <span style={{color:"white",fontSize:13,fontWeight:"bold"}}>✓</span>}
+            </div>
+            <span style={{fontSize:14,color:checklist[item.id]?"var(--color-text-secondary)":"var(--color-text-primary)",textDecoration:checklist[item.id]?"line-through":"none",flex:1}}>
+              {item.label}
+            </span>
+            {!item.required && <span style={{fontSize:10,color:"#888",background:"var(--color-background-secondary)",padding:"2px 8px",borderRadius:20,flexShrink:0}}>Optionnel</span>}
+          </div>
+        ))}
+        <p style={{fontSize:12,color:"var(--color-text-secondary)",marginTop:"1rem",fontStyle:"italic"}}>Les points obligatoires doivent être cochés pour terminer.</p>
+      </div>
+      {!CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id]) && (
+        <p style={{color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:8}}>⚠️ Veuillez cocher tous les points obligatoires</p>
+      )}
+      <button className="btn-finish" style={{width:"100%",opacity:CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id])?1:0.4}}
+        disabled={saving||!CHECKLIST_ITEMS.filter(i=>i.required).every(i=>checklist[i.id])} onClick={terminer}>
+        {saving?"Finalisation…":"✅ Terminer le chantier"}
+      </button>
     </div>
   );
 
@@ -378,20 +312,16 @@ export default function TechDashboard({ user, onLogout }) {
   // ══════════════════════════════════════════════════════════════════════════
 
   if (showSuccess) return (
-    <div style={S.root}>
-      <Topbar/>
-      <div style={{...S.content, textAlign:"center", paddingTop:"3rem"}}>
-        <div style={{width:80,height:80,borderRadius:"50%",background:"#35B499",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1.5rem",fontSize:36}}>✓</div>
-        <h2 style={{color:"#35B499",marginBottom:8}}>Intervention terminée !</h2>
-        <p style={{color:"var(--color-text-secondary)",fontSize:14,marginBottom:8}}>Le bon a été enregistré avec succès.</p>
-        {emailStatus==="sent"          && <p style={{color:"#35B499",fontSize:14,marginBottom:24}}>✉️ Email envoyé au client</p>}
-        {emailStatus.startsWith("error") && <p style={{color:"#e74c3c",fontSize:13,marginBottom:24}}>⚠️ Erreur envoi email — le bon est bien enregistré</p>}
-        {!selected.clientEmail         && <p style={{color:"#888",fontSize:13,marginBottom:24}}>Aucun email client renseigné</p>}
-        <button className="btn-primary" onClick={() => { setShowSuccess(false); setView("list"); }}>
-          Retour à mes interventions
-        </button>
-      </div>
-      <BottomNav/>
+    <div className="container" style={{textAlign:"center",paddingTop:"3rem"}}>
+      <div style={{width:80,height:80,borderRadius:"50%",background:"#35B499",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1.5rem",fontSize:36}}>✓</div>
+      <h2 style={{color:"#35B499",marginBottom:8}}>Intervention terminée !</h2>
+      <p style={{color:"var(--color-text-secondary)",fontSize:14,marginBottom:8}}>Le bon a été enregistré avec succès.</p>
+      {emailStatus==="sent"            && <p style={{color:"#35B499",fontSize:14,marginBottom:24}}>✉️ Email envoyé au client</p>}
+      {emailStatus.startsWith("error") && <p style={{color:"#e74c3c",fontSize:13,marginBottom:24}}>⚠️ Erreur envoi email — le bon est bien enregistré</p>}
+      {!selected.clientEmail           && <p style={{color:"#888",fontSize:13,marginBottom:24}}>Aucun email client renseigné</p>}
+      <button className="btn-primary" onClick={() => { setShowSuccess(false); setView("list"); }}>
+        Retour à mes interventions
+      </button>
     </div>
   );
 
@@ -400,22 +330,18 @@ export default function TechDashboard({ user, onLogout }) {
   // ══════════════════════════════════════════════════════════════════════════
 
   if (sigMode) return (
-    <div style={S.root}>
-      <Topbar/>
-      <div style={S.content}>
-        <div className="page-header">
-          <h2>Signature — {sigMode==="tech"?"Collaborateur":"Client"}</h2>
-        </div>
-        <div className="card" style={{textAlign:"center"}}>
-          <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12}}>Signez dans le cadre ci-dessous</p>
-          <canvas ref={canvasRef} width={560} height={200} style={{border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,width:"100%",touchAction:"none",background:"white"}}/>
-          <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"center"}}>
-            <button className="btn-outline" onClick={() => setSigMode(null)}>Annuler</button>
-            <button className="btn-primary" onClick={saveSig}>Valider la signature</button>
-          </div>
+    <div className="container">
+      <div className="page-header">
+        <h2>Signature — {sigMode==="tech"?"Collaborateur":"Client"}</h2>
+      </div>
+      <div className="card" style={{textAlign:"center"}}>
+        <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12}}>Signez dans le cadre ci-dessous</p>
+        <canvas ref={canvasRef} width={560} height={200} style={{border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,width:"100%",touchAction:"none",background:"white"}}/>
+        <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"center"}}>
+          <button className="btn-outline" onClick={() => setSigMode(null)}>Annuler</button>
+          <button className="btn-primary" onClick={saveSig}>Valider la signature</button>
         </div>
       </div>
-      <BottomNav/>
     </div>
   );
 
@@ -424,118 +350,123 @@ export default function TechDashboard({ user, onLogout }) {
   // ══════════════════════════════════════════════════════════════════════════
 
   if (view==="bon" && selected) return (
-    <div style={S.root}>
-      <Topbar/>
-      <div style={S.content}>
-        <div className="page-header">
-          <button className="btn-back" onClick={() => setView("list")}>← Retour</button>
-          <h2>{selected.ref}</h2>
-          <span className="badge" style={{background:statutColor(selected.statut),color:statutText(selected.statut)}}>{selected.statut}</span>
-        </div>
-
-        <div className="card readonly">
-          <div className="card-title">Client <span className="locked-badge">🔒 Admin</span></div>
-          <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
-          <div className="info-row"><span>Téléphone</span><b>{selected.clientTel||"—"}</b></div>
-          <div className="info-row"><span>Email</span><b>{selected.clientEmail||"—"}</b></div>
-          <div className="info-row"><span>Adresse</span><b>{selected.adresseIntervention||selected.clientAdresse||"—"}</b></div>
-        </div>
-
-        <div className="card readonly">
-          <div className="card-title">Intervention <span className="locked-badge">🔒 Admin</span></div>
-          <div className="info-row"><span>Type</span><b>{selected.type}</b></div>
-          <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
-          <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
-        </div>
-
-        {selected.demandeClient && (
-          <div className="card readonly">
-            <div className="card-title">Demande client <span className="locked-badge">🔒 Admin</span></div>
-            <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6}}>{selected.demandeClient}</p>
-          </div>
-        )}
-
-        <div className="card">
-          <div className="card-title">Suivi</div>
-          <div className="info-row"><span>Arrivée réelle</span><b>{fmtTs(selected.heureArrivee)}</b></div>
-          <div className="info-row"><span>Fin intervention</span><b>{fmtTs(selected.heureFin)}</b></div>
-          {selected.heureArrivee && selected.heureFin && (
-            <div className="info-row"><span>Durée</span><b style={{color:"#35B499"}}>{calcDuree(selected.heureArrivee,selected.heureFin)}</b></div>
-          )}
-          {selected.geoArrivee && (
-            <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
-          )}
-          <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-            {selected.statut==="planifié" && (
-              <button className="btn-arrive" disabled={saving} onClick={arriver}>📍 Arrivé sur le chantier</button>
-            )}
-            {selected.statut==="terminé" && selected.emailEnvoye && (
-              <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
-            )}
-          </div>
-          {emailStatus==="sent"            && <p style={{color:"#35B499",fontSize:13,marginTop:8}}>✅ Email envoyé au client !</p>}
-          {emailStatus.startsWith("error") && <p style={{color:"#e74c3c",fontSize:11,marginTop:8,wordBreak:"break-all"}}>⚠️ {emailStatus}</p>}
-          {emailStatus==="sending"         && <p style={{color:"#888",fontSize:13,marginTop:8}}>Envoi de l'email…</p>}
-        </div>
-
-        {selected.statut!=="planifié" && (
-          <>
-            <div className="card">
-              <div className="card-title">Observations</div>
-              <div className="field" style={{marginBottom:12}}>
-                <label>Commentaires Cocon+</label>
-                <textarea value={obsCocon} onChange={e=>setObsCocon(e.target.value)} placeholder="Travaux réalisés, constats…" disabled={selected.statut==="terminé"}/>
-              </div>
-              <div className="field">
-                <label>Commentaires client</label>
-                <textarea value={obsClient} onChange={e=>setObsClient(e.target.value)} placeholder="Retour du client…" disabled={selected.statut==="terminé"}/>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-title">Signatures</div>
-              <div className="row2">
-                <div>
-                  <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Collaborateur</p>
-                  {sigTech ? <img src={sigTech} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}}/> : <div className="sig-placeholder-sm">Non signé</div>}
-                  {selected.statut!=="terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("tech")}>Signer</button>}
-                </div>
-                <div>
-                  <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
-                  {selected.statut!=="terminé" && (
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:11,color:"var(--color-text-secondary)",display:"block",marginBottom:3}}>Nom du signataire</label>
-                      <input type="text" placeholder={selected.clientNom+" "+selected.clientPrenom}
-                        value={signataireNom||selected.clientNom+" "+selected.clientPrenom}
-                        onChange={e=>setSignataireNom(e.target.value)}
-                        style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}/>
-                    </div>
-                  )}
-                  {selected.statut==="terminé" && selected.signataire && <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>}
-                  {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}}/> : <div className="sig-placeholder-sm">Non signé</div>}
-                  {selected.statut!=="terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
-                </div>
-              </div>
-            </div>
-
-            {selected.statut!=="terminé" && (
-              <button className="btn-outline" style={{width:"100%",marginBottom:10}} disabled={saving} onClick={sauvegarder}>
-                {saving?"Sauvegarde…":"Sauvegarder"}
-              </button>
-            )}
-            {selected.statut==="en cours" && (
-              <div>
-                {(!sigTech||!sigClient) && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Les deux signatures sont requises pour continuer</p>}
-                <button className="btn-finish" style={{width:"100%",opacity:(!sigTech||!sigClient)?0.4:1}}
-                  disabled={!sigTech||!sigClient} onClick={()=>{ sauvegarder(); setShowChecklist(true); }}>
-                  Valider la checklist →
-                </button>
-              </div>
-            )}
-          </>
-        )}
+    <div className="container">
+      <div className="page-header">
+        <button className="btn-back" onClick={() => setView("list")}>← Retour</button>
+        <h2>{selected.ref}</h2>
+        <span className="badge" style={{background:statutColor(selected.statut),color:statutText(selected.statut)}}>{selected.statut}</span>
       </div>
-      <BottomNav/>
+
+      <div className="card readonly">
+        <div className="card-title">Client <span className="locked-badge">🔒 Admin</span></div>
+        <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
+        <div className="info-row"><span>Téléphone</span><b>{selected.clientTel||"—"}</b></div>
+        <div className="info-row"><span>Email</span><b>{selected.clientEmail||"—"}</b></div>
+        <div className="info-row"><span>Adresse</span><b>
+          {selected.adresseIntervention||selected.clientAdresse ? (
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention||selected.clientAdresse)}`}
+              target="_blank" rel="noreferrer"
+              style={{color:"#2a9d8f",textDecoration:"underline"}}
+              onClick={e=>e.stopPropagation()}>
+              {selected.adresseIntervention||selected.clientAdresse} 📍
+            </a>
+          ) : "—"}
+        </b></div>
+      </div>
+
+      <div className="card readonly">
+        <div className="card-title">Intervention <span className="locked-badge">🔒 Admin</span></div>
+        <div className="info-row"><span>Type</span><b>{selected.type}</b></div>
+        <div className="info-row"><span>Prévu le</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
+        <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
+      </div>
+
+      {selected.demandeClient && (
+        <div className="card readonly">
+          <div className="card-title">Demande client <span className="locked-badge">🔒 Admin</span></div>
+          <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6}}>{selected.demandeClient}</p>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">Suivi</div>
+        <div className="info-row"><span>Arrivée réelle</span><b>{fmtTs(selected.heureArrivee)}</b></div>
+        <div className="info-row"><span>Fin intervention</span><b>{fmtTs(selected.heureFin)}</b></div>
+        {selected.heureArrivee && selected.heureFin && (
+          <div className="info-row"><span>Durée</span><b style={{color:"#35B499"}}>{calcDuree(selected.heureArrivee,selected.heureFin)}</b></div>
+        )}
+        {selected.geoArrivee && (
+          <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
+        )}
+        <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+          {selected.statut==="planifié" && (
+            <button className="btn-arrive" disabled={saving} onClick={arriver}>📍 Arrivé sur le chantier</button>
+          )}
+          {selected.statut==="terminé" && selected.emailEnvoye && (
+            <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
+          )}
+        </div>
+        {emailStatus==="sent"            && <p style={{color:"#35B499",fontSize:13,marginTop:8}}>✅ Email envoyé au client !</p>}
+        {emailStatus.startsWith("error") && <p style={{color:"#e74c3c",fontSize:11,marginTop:8,wordBreak:"break-all"}}>⚠️ {emailStatus}</p>}
+        {emailStatus==="sending"         && <p style={{color:"#888",fontSize:13,marginTop:8}}>Envoi de l'email…</p>}
+      </div>
+
+      {selected.statut!=="planifié" && (
+        <>
+          <div className="card">
+            <div className="card-title">Observations</div>
+            <div className="field" style={{marginBottom:12}}>
+              <label>Commentaires Cocon+</label>
+              <textarea value={obsCocon} onChange={e=>setObsCocon(e.target.value)} placeholder="Travaux réalisés, constats…" disabled={selected.statut==="terminé"}/>
+            </div>
+            <div className="field">
+              <label>Commentaires client</label>
+              <textarea value={obsClient} onChange={e=>setObsClient(e.target.value)} placeholder="Retour du client…" disabled={selected.statut==="terminé"}/>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">Signatures</div>
+            <div className="row2">
+              <div>
+                <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Collaborateur</p>
+                {sigTech ? <img src={sigTech} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}}/> : <div className="sig-placeholder-sm">Non signé</div>}
+                {selected.statut!=="terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("tech")}>Signer</button>}
+              </div>
+              <div>
+                <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:6}}>Client</p>
+                {selected.statut!=="terminé" && (
+                  <div style={{marginBottom:6}}>
+                    <label style={{fontSize:11,color:"var(--color-text-secondary)",display:"block",marginBottom:3}}>Nom du signataire</label>
+                    <input type="text" placeholder={selected.clientNom+" "+selected.clientPrenom}
+                      value={signataireNom||selected.clientNom+" "+selected.clientPrenom}
+                      onChange={e=>setSignataireNom(e.target.value)}
+                      style={{width:"100%",padding:"6px 10px",fontSize:12,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}/>
+                  </div>
+                )}
+                {selected.statut==="terminé" && selected.signataire && <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:4}}>{selected.signataire}</p>}
+                {sigClient ? <img src={sigClient} alt="sig" style={{width:"100%",height:70,objectFit:"contain",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8}}/> : <div className="sig-placeholder-sm">Non signé</div>}
+                {selected.statut!=="terminé" && <button className="btn-outline sm" style={{marginTop:6}} onClick={()=>startSig("cli")}>Signer</button>}
+              </div>
+            </div>
+          </div>
+
+          {selected.statut!=="terminé" && (
+            <button className="btn-outline" style={{width:"100%",marginBottom:10}} disabled={saving} onClick={sauvegarder}>
+              {saving?"Sauvegarde…":"Sauvegarder"}
+            </button>
+          )}
+          {selected.statut==="en cours" && (
+            <div>
+              {(!sigTech||!sigClient) && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Les deux signatures sont requises pour continuer</p>}
+              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech||!sigClient)?0.4:1}}
+                disabled={!sigTech||!sigClient} onClick={()=>{ sauvegarder(); setShowChecklist(true); }}>
+                Valider la checklist →
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 
@@ -548,50 +479,39 @@ export default function TechDashboard({ user, onLogout }) {
     const week2 = getWeekDays(1);
 
     const PlanWeek = ({ days, label }) => {
-      const hasBons = days.some(day => planBons.some(b => b.datePrevue === fmtDateKey(day)));
+      const daysWithBons = days.filter(day => planBons.some(b => b.datePrevue === fmtDateKey(day)));
       return (
         <div style={{marginBottom:20}}>
           <div style={{fontSize:10,fontWeight:600,color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"1.2px",marginBottom:8}}>
             {label}
           </div>
+          {daysWithBons.length === 0 && (
+            <p style={{fontSize:12,color:"var(--color-text-secondary)",fontStyle:"italic",paddingBottom:8}}>Aucune intervention.</p>
+          )}
           {days.map(day => {
-            const dateStr  = fmtDateKey(day);
-            const dayBons  = planBons.filter(b => b.datePrevue === dateStr);
-            const todayDay = isToday(day);
+            const dateStr = fmtDateKey(day);
+            const dayBons = planBons.filter(b => b.datePrevue === dateStr);
             if (dayBons.length === 0) return null;
+            const todayDay = isToday(day);
             return (
               <div key={dateStr} style={{marginBottom:8}}>
-                <div style={{
-                  padding:"7px 12px", borderRadius:8, marginBottom:5,
-                  background:todayDay?"#35B499":"var(--color-background-secondary)",
-                  color:todayDay?"white":"var(--color-text-secondary)",
-                  display:"flex", justifyContent:"space-between", alignItems:"center",
-                }}>
+                <div style={{padding:"7px 12px",borderRadius:8,marginBottom:5,background:todayDay?"#35B499":"var(--color-background-secondary)",color:todayDay?"white":"var(--color-text-secondary)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontWeight:700,fontSize:13,textTransform:"capitalize"}}>
-                    {todayDay?"📍 ":""}{fmtDay(day)}
+                    {todayDay?"📍 ":""}{fmtDayLabel(day)}
                   </span>
                   <span style={{fontSize:10,opacity:0.8}}>{dayBons.length} bon{dayBons.length>1?"s":""}</span>
                 </div>
                 {dayBons.map(b => {
                   const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
+                  const borderColor = b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#E8845C":"#35B499";
                   return (
-                    <div key={b.id} style={{
-                      background:"var(--color-background-primary)",
-                      border:"0.5px solid var(--color-border-tertiary)",
-                      borderLeft:`3px solid ${b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#E8845C":"#35B499"}`,
-                      borderRadius:"0 8px 8px 0",
-                      padding:"8px 12px", marginBottom:4,
-                    }}>
+                    <div key={b.id} style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderLeft:`3px solid ${borderColor}`,borderRadius:"0 8px 8px 0",padding:"8px 12px",marginBottom:4}}>
                       <div style={{fontWeight:600,fontSize:12,color:"var(--color-text-primary)",marginBottom:2}}>
                         {b.heurePrevue} · {b.clientNom} {b.clientPrenom}
                       </div>
                       <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:2}}>{b.type}</div>
                       {ville && <div style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 {ville}</div>}
-                      <span style={{
-                        display:"inline-block",marginTop:4,fontSize:9,padding:"1px 7px",borderRadius:20,
-                        background:statutColor(b.statut),color:statutText(b.statut),
-                        fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px",
-                      }}>
+                      <span style={{display:"inline-block",marginTop:4,fontSize:9,padding:"1px 7px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut),fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
                         {b.statut}
                       </span>
                     </div>
@@ -600,38 +520,25 @@ export default function TechDashboard({ user, onLogout }) {
               </div>
             );
           })}
-          {!hasBons && <p style={{fontSize:12,color:"var(--color-text-secondary)",fontStyle:"italic",padding:"8px 0"}}>Aucune intervention cette semaine.</p>}
         </div>
       );
     };
 
-    const w1count = planBons.filter(b => b.datePrevue >= fmtDateKey(week1[0]) && b.datePrevue <= fmtDateKey(week1[6])).length;
-    const w2count = planBons.filter(b => b.datePrevue >= fmtDateKey(week2[0]) && b.datePrevue <= fmtDateKey(week2[6])).length;
+    const w1 = planBons.filter(b => b.datePrevue >= fmtDateKey(week1[0]) && b.datePrevue <= fmtDateKey(week1[6])).length;
+    const w2 = planBons.filter(b => b.datePrevue >= fmtDateKey(week2[0]) && b.datePrevue <= fmtDateKey(week2[6])).length;
 
     return (
-      <div style={S.root}>
-        <Topbar/>
-        <div style={S.content}>
-          <div style={{marginBottom:14}}>
-            <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mon planning</h2>
-            <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>Semaine en cours &amp; semaine suivante</p>
-          </div>
-          <div style={S.kpiRow}>
-            <div style={S.kpi}>
-              <div style={{...S.kpiAccent,background:"#35B499"}}/>
-              <div style={{fontSize:22,fontWeight:800,color:"#1a1a1a",lineHeight:1}}>{w1count}</div>
-              <div style={{fontSize:10,color:"#888",marginTop:4}}>Cette semaine</div>
-            </div>
-            <div style={S.kpi}>
-              <div style={{...S.kpiAccent,background:"#5C8EE8"}}/>
-              <div style={{fontSize:22,fontWeight:800,color:"#1a1a1a",lineHeight:1}}>{w2count}</div>
-              <div style={{fontSize:10,color:"#888",marginTop:4}}>Semaine suivante</div>
-            </div>
-          </div>
-          <PlanWeek days={week1} label="Semaine en cours"/>
-          <PlanWeek days={week2} label="Semaine suivante"/>
+      <div className="container">
+        <div style={{marginBottom:14}}>
+          <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mon planning</h2>
+          <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>Semaine en cours &amp; semaine suivante</p>
         </div>
-        <BottomNav/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+          <KPI label="Cette semaine"  value={w1} color="#35B499"/>
+          <KPI label="Sem. suivante" value={w2} color="#5C8EE8"/>
+        </div>
+        <PlanWeek days={week1} label="Semaine en cours"/>
+        <PlanWeek days={week2} label="Semaine suivante"/>
       </div>
     );
   }
@@ -640,78 +547,53 @@ export default function TechDashboard({ user, onLogout }) {
   // VUE : Liste interventions du jour
   // ══════════════════════════════════════════════════════════════════════════
 
-  const enCours  = bons.filter(b=>b.statut==="en cours").length;
-  const planifie = bons.filter(b=>b.statut==="planifié").length;
-  const termine  = bons.filter(b=>b.statut==="terminé").length;
-
   return (
-    <div style={S.root}>
-      <Topbar/>
-      <div style={S.content}>
-        <div style={{marginBottom:14}}>
-          <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mes interventions du jour</h2>
-          <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>
-            {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
-          </p>
-        </div>
+    <div className="container">
+      <div style={{marginBottom:14}}>
+        <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mes interventions du jour</h2>
+        <p style={{fontSize:11,color:"var(--color-text-secondary)",textTransform:"capitalize"}}>
+          {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
+        </p>
+      </div>
 
-        {/* KPIs */}
-        <div style={S.kpiRow}>
-          <div style={S.kpi}>
-            <div style={{...S.kpiAccent,background:"#35B499"}}/>
-            <div style={{fontSize:22,fontWeight:800,color:"#1a1a1a",lineHeight:1}}>{bons.length}</div>
-            <div style={{fontSize:10,color:"#888",marginTop:4}}>Aujourd'hui</div>
-          </div>
-          <div style={S.kpi}>
-            <div style={{...S.kpiAccent,background:"#E8845C"}}/>
-            <div style={{fontSize:22,fontWeight:800,color:"#1a1a1a",lineHeight:1}}>{enCours}</div>
-            <div style={{fontSize:10,color:"#888",marginTop:4}}>En cours</div>
-          </div>
-        </div>
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        <KPI label="Aujourd'hui" value={bons.length}                              color="#35B499"/>
+        <KPI label="En cours"   value={bons.filter(b=>b.statut==="en cours").length} color="#E8845C"/>
+      </div>
 
-        {/* Liste */}
-        {bons.length === 0 ? (
-          <div style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",padding:"2rem",textAlign:"center",color:"var(--color-text-secondary)",fontSize:13}}>
-            Aucun bon assigné pour aujourd'hui.
-          </div>
-        ) : (
-          bons.map(b => {
-            const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
-            return (
-              <div key={b.id} onClick={() => openBon(b)}
-                style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",marginBottom:10,overflow:"hidden",cursor:"pointer"}}>
-                {/* Header card */}
-                <div style={{padding:"10px 14px",borderBottom:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                  <span style={{fontSize:11,fontWeight:600,color:"#35B499"}}>{b.ref}</span>
-                  <span style={{fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut)}}>{b.statut}</span>
-                </div>
-                {/* Body card */}
-                <div style={{padding:"10px 14px"}}>
-                  <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)",marginBottom:4}}>{b.clientNom} {b.clientPrenom}</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                    <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>{b.type}</span>
-                    {ville && <span style={{fontSize:12,color:"#35B499",fontWeight:600}}>📍 {ville}</span>}
-                  </div>
-                </div>
-                {/* Footer card */}
-                <div style={{padding:"8px 14px",background:"#fafaf8",borderTop:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                  <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Prévu à {b.heurePrevue}</span>
-                  {b.statut==="planifié" && (
-                    <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>
-                  )}
-                  {b.statut==="en cours" && (
-                    <span style={{fontSize:11,color:"#E8845C",fontWeight:600}}>Clôturer →</span>
-                  )}
-                  {b.statut==="terminé" && (
-                    <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>✓ Terminé</span>
-                  )}
+      {/* Liste */}
+      {bons.length === 0 ? (
+        <div style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",padding:"2rem",textAlign:"center",color:"var(--color-text-secondary)",fontSize:13}}>
+          Aucun bon assigné pour aujourd'hui.
+        </div>
+      ) : (
+        bons.map(b => {
+          const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
+          return (
+            <div key={b.id} onClick={() => openBon(b)}
+              style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",marginBottom:10,overflow:"hidden",cursor:"pointer"}}>
+              <div style={{padding:"10px 14px",borderBottom:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:11,fontWeight:600,color:"#35B499"}}>{b.ref}</span>
+                <span style={{fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut)}}>{b.statut}</span>
+              </div>
+              <div style={{padding:"10px 14px"}}>
+                <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)",marginBottom:4}}>{b.clientNom} {b.clientPrenom}</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                  <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>{b.type}</span>
+                  {ville && <span style={{fontSize:12,color:"#35B499",fontWeight:600}}>📍 {ville}</span>}
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
-      <BottomNav/>
+              <div style={{padding:"8px 14px",background:"#fafaf8",borderTop:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Prévu à {b.heurePrevue}</span>
+                {b.statut==="planifié" && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>}
+                {b.statut==="en cours" && <span style={{fontSize:11,color:"#E8845C",fontWeight:600}}>Clôturer →</span>}
+                {b.statut==="terminé"  && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>✓ Terminé</span>}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
