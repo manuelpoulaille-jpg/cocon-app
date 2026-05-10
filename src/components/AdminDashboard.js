@@ -319,7 +319,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
-    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true} onOpenBon={(bon)=>{setSelected(bon);setView("detail");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
