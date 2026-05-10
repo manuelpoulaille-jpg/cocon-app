@@ -8,6 +8,7 @@ import logoBase64 from "../logoBase64";
 import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
+import PlanningDashboard from "./PlanningDashboard";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -318,6 +319,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
+    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -636,7 +638,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -650,6 +652,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
+          <button className={`ca-nav-item${view==="planning"?" active":""}`} onClick={()=>navigate("planning")}>{view==="planning"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5C8EE8"}}/> Planning</button>
           <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>

@@ -70,10 +70,10 @@ const TYPES_INTERVENTION = [
 
 // ── Composant principal ───────────────────────────────────────────────────────
 
-export default function PlanningDashboard({ user }) {
-  // ⚠️  Adaptez cette condition selon votre gestion des rôles
-  // Ex : user.role === "admin" | user.isAdmin | user.email === "admin@cocon-plus.fr"
-  const isAdmin = user?.role === "admin";
+export default function PlanningDashboard({ user, isAdmin: isAdminProp }) {
+  // isAdminProp peut être passé directement depuis AdminDashboard (toujours true)
+  // Sinon, déduire depuis user.role pour une utilisation future dans TechDashboard
+  const isAdmin = isAdminProp !== undefined ? isAdminProp : user?.role === "admin";
 
   const [weekDays] = useState(getWeekDays());
   const [bons, setBons] = useState([]);
