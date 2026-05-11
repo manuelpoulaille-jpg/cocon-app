@@ -44,6 +44,23 @@ const extractVille = (adresse) => {
   return match ? match[1].trim() : "";
 };
 
+// Calcule la durée en heures entre deux heures "HH:MM"
+const getDurationHours = (debut, fin) => {
+  if (!debut || !fin) return 1;
+  const [dh, dm] = debut.split(":").map(Number);
+  const [fh, fm] = fin.split(":").map(Number);
+  const duration = (fh * 60 + fm - dh * 60 - dm) / 60;
+  return Math.max(0.25, duration);
+};
+
+// Calcule l'heure de fin par défaut (+2h)
+const defaultHeureFinPrevue = (heurePrevue) => {
+  if (!heurePrevue) return "10:00";
+  const [h, m] = heurePrevue.split(":").map(Number);
+  const fin = h + 2;
+  return `${String(Math.min(fin, 20)).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+};
+
 const statutBg = (s) =>
   ({ planifié:"#d4f0ea","en cours":"#fff0e0",terminé:"#35B499" }[s] || "#eee");
 
@@ -67,7 +84,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [formStep, setFormStep]     = useState(null);
   const [form, setForm]             = useState({});
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
-  const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé" });
+  const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
   useEffect(() => { fetchData(); }, []);
 
@@ -104,12 +121,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const handleCellClick = (dateStr, hour) => {
     if (!isAdmin) return;
-    setForm({ datePrevue:dateStr, heurePrevue:`${String(hour).padStart(2,"0")}:00` });
+    const hStr = `${String(hour).padStart(2,"0")}:00`;
+    setForm({ datePrevue:dateStr, heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
     setFormStep(1);
   };
 
   const handleAddButton = () => {
-    setForm({ datePrevue:fmtDate(new Date()), heurePrevue:"08:00" });
+    const hStr = "08:00";
+    setForm({ datePrevue:fmtDate(new Date()), heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
     setFormStep(1);
   };
 
@@ -130,7 +149,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         adresseIntervention:form.adresseIntervention||"", clientAdresse:form.adresseIntervention||"",
         demandeClient:form.demandeClient||"", numDevis:form.numDevis||"",
         signataire:form.signataire||"", types:[form.type], type:form.type,
-        datePrevue:form.datePrevue, heurePrevue:form.heurePrevue, techNom:form.techNom, techId:"",
+        datePrevue:form.datePrevue, heurePrevue:form.heurePrevue, heureFinPrevue:form.heureFinPrevue||"", techNom:form.techNom, techId:"",
         statut:"planifié", createdAt:Timestamp.now(),
         heureArrivee:null, heureFin:null, obsCocon:"", obsClient:"",
         signatureTech:null, signatureClient:null, emailEnvoye:false,
@@ -143,12 +162,16 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   };
 
   const createIndispo = async () => {
-    if (!indispoData.techNom||!indispoData.dateDebut||!indispoData.dateFin) return;
+    if (!indispoData.techNom||!indispoData.dateDebut) return;
     setSaving(true);
     try {
-      await addDoc(collection(db,"indispos"), indispoData);
+      const dataToSave = {
+        ...indispoData,
+        dateFin: indispoData.jourUnique ? indispoData.dateDebut : indispoData.dateFin,
+      };
+      await addDoc(collection(db,"indispos"), dataToSave);
       setIndispoFormOpen(false);
-      setIndispoData({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé" });
+      setIndispoData({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
       await fetchData();
     } catch(e) {}
     setSaving(false);
@@ -166,7 +189,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── ÉTAPE 1 ───────────────────────────────────────────────────────────────
   if (formStep === 1) {
-    const canGoNext = form.datePrevue && form.heurePrevue && form.techNom && form.type;
+    const canGoNext = form.datePrevue && form.heurePrevue && form.heureFinPrevue && form.techNom && form.type;
     return (
       <div className="container">
         <div className="page-header">
@@ -179,8 +202,13 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="field"><label>Date *</label>
             <input type="date" min={rangeStart} max={rangeEnd} value={form.datePrevue||""} onChange={e=>setForm(f=>({...f,datePrevue:e.target.value}))} />
           </div>
-          <div className="field"><label>Heure prévue *</label>
-            <input type="time" value={form.heurePrevue||""} onChange={e=>setForm(f=>({...f,heurePrevue:e.target.value}))} />
+          <div className="row2">
+            <div className="field"><label>Heure de début *</label>
+              <input type="time" value={form.heurePrevue||""} onChange={e=>setForm(f=>({...f,heurePrevue:e.target.value,heureFinPrevue:defaultHeureFinPrevue(e.target.value)}))} />
+            </div>
+            <div className="field"><label>Heure de fin *</label>
+              <input type="time" value={form.heureFinPrevue||""} min={form.heurePrevue||""} onChange={e=>setForm(f=>({...f,heureFinPrevue:e.target.value}))} />
+            </div>
           </div>
           <div className="field"><label>Collaborateur *</label>
             <select style={selectStyle} value={form.techNom||""} onChange={e=>setForm(f=>({...f,techNom:e.target.value}))}>
@@ -215,7 +243,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <div className="card readonly" style={{marginBottom:12}}>
           <div className="card-title">Récapitulatif <span className="locked-badge">🔒 Étape 1</span></div>
-          <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel} à {form.heurePrevue}</b></div>
+          <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel} · {form.heurePrevue} → {form.heureFinPrevue}</b></div>
           <div className="info-row"><span>Type</span><b>{form.type}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{form.techNom}</b></div>
         </div>
@@ -264,6 +292,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── INDISPO FORM ──────────────────────────────────────────────────────────
   if (indispoFormOpen) {
+    const canSave = indispoData.techNom && indispoData.dateDebut && (indispoData.jourUnique || indispoData.dateFin);
     return (
       <div className="container">
         <div className="page-header">
@@ -277,30 +306,57 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
               {techList.map(t=><option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <div className="field"><label>Du *</label><input type="date" value={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateDebut:e.target.value}))} /></div>
-          <div className="field"><label>Au *</label><input type="date" value={indispoData.dateFin} min={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateFin:e.target.value}))} /></div>
+
+          {/* Toggle jour unique */}
+          <div onClick={()=>setIndispoData(d=>({...d,jourUnique:!d.jourUnique,dateFin:""}))}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer",marginBottom:4}}>
+            <div style={{width:44,height:24,borderRadius:12,background:indispoData.jourUnique?"#35B499":"#ddd",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:2,left:indispoData.jourUnique?20:2,width:20,height:20,borderRadius:"50%",background:"white",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:500,color:"var(--color-text-primary)"}}>Jour unique</div>
+              <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>Jour férié, absence ponctuelle</div>
+            </div>
+          </div>
+
+          <div className="field"><label>{indispoData.jourUnique?"Date *":"Du *"}</label>
+            <input type="date" value={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateDebut:e.target.value}))} />
+          </div>
+          {!indispoData.jourUnique && (
+            <div className="field"><label>Au *</label>
+              <input type="date" value={indispoData.dateFin} min={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateFin:e.target.value}))} />
+            </div>
+          )}
           <div className="field"><label>Motif</label>
             <select style={selectStyle} value={indispoData.motif} onChange={e=>setIndispoData(d=>({...d,motif:e.target.value}))}>
-              {["Congé","Maladie","Formation","Autre"].map(m=><option key={m} value={m}>{m}</option>)}
+              {["Congé","Maladie","Formation","Jour férié","Autre"].map(m=><option key={m} value={m}>{m}</option>)}
             </select>
           </div>
         </div>
+
         {indispos.length > 0 && (
           <div className="card">
             <div className="card-title">Indisponibilités en cours</div>
-            {indispos.map(i=>(
-              <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
-                <div>
-                  <p style={{fontSize:13,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>{i.techNom}</p>
-                  <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>{i.motif} · {i.dateDebut}{i.dateDebut!==i.dateFin?` → ${i.dateFin}`:""}</p>
+            {indispos.map(i=>{
+              const jourUnique = i.dateDebut === i.dateFin;
+              return (
+                <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
+                  <div>
+                    <p style={{fontSize:13,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>{i.techNom}</p>
+                    <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>
+                      {i.motif} · {jourUnique ? i.dateDebut : `${i.dateDebut} → ${i.dateFin}`}
+                      {jourUnique && <span style={{marginLeft:6,fontSize:9,background:"#e8f0fe",color:"#185FA5",padding:"1px 6px",borderRadius:20,fontWeight:600}}>Jour unique</span>}
+                    </p>
+                  </div>
+                  <button onClick={()=>deleteIndispo(i.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:16,padding:"4px 8px"}}>🗑</button>
                 </div>
-                <button onClick={()=>deleteIndispo(i.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:16,padding:"4px 8px"}}>🗑</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
-        <button className="btn-primary" style={{width:"100%",opacity:(indispoData.techNom&&indispoData.dateDebut&&indispoData.dateFin)?1:0.4}}
-          disabled={saving||!indispoData.techNom||!indispoData.dateDebut||!indispoData.dateFin} onClick={createIndispo}>
+
+        <button className="btn-primary" style={{width:"100%",opacity:canSave?1:0.4}}
+          disabled={saving||!canSave} onClick={createIndispo}>
           {saving?"Enregistrement…":"Enregistrer"}
         </button>
       </div>
@@ -352,17 +408,20 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                     background:indispo?"repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(0,0,0,0.025) 5px,rgba(0,0,0,0.025) 10px)":today?"rgba(53,180,153,0.03)":"transparent",
                     cursor:isAdmin?"pointer":"default",position:"relative"}}>
                   {dayBons.map(b => {
-                    const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
-                    const color = techColors[b.techNom]||"#35B499";
+                    const ville    = extractVille(b.adresseIntervention||b.clientAdresse||"");
+                    const color    = techColors[b.techNom]||"#35B499";
+                    const duration = getDurationHours(b.heurePrevue, b.heureFinPrevue);
+                    const blockH   = Math.max(CELL_HEIGHT - 8, Math.round(duration * CELL_HEIGHT) - 8);
                     return (
                       <div key={b.id} onClick={e=>handleBonClick(e,b)}
                         style={{background:statutBg(b.statut),borderLeft:`3px solid ${color}`,borderRadius:"0 6px 6px 0",
                           padding:"4px 6px",marginBottom:2,fontSize:10,lineHeight:1.4,overflow:"hidden",
-                          cursor:onOpenBon?"pointer":"default",transition:"opacity .15s"}}
+                          height:blockH,cursor:onOpenBon?"pointer":"default",transition:"opacity .15s",
+                          position:"relative",zIndex:1}}
                         onMouseEnter={e=>{if(onOpenBon)e.currentTarget.style.opacity="0.75";}}
                         onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
                         <div style={{fontWeight:700,color:"var(--color-text-primary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {b.heurePrevue} · {b.clientNom} {b.clientPrenom}
+                          {b.heurePrevue}{b.heureFinPrevue?` → ${b.heureFinPrevue}`:""} · {b.clientNom} {b.clientPrenom}
                         </div>
                         <div style={{color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:9}}>
                           {b.type}
