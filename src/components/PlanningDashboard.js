@@ -53,6 +53,15 @@ const getDurationHours = (debut, fin) => {
   return Math.max(0.25, duration);
 };
 
+// Calcule le décalage vertical en px depuis le début de la grille (7h = 0)
+const getTopOffset = (heure) => {
+  if (!heure) return 0;
+  const [h, m] = heure.split(":").map(Number);
+  return (h - 7 + m / 60) * CELL_HEIGHT;
+};
+
+const GRID_HEIGHT = 12 * CELL_HEIGHT; // 7h → 18h
+
 // Calcule l'heure de fin par défaut (+2h)
 const defaultHeureFinPrevue = (heurePrevue) => {
   if (!heurePrevue) return "10:00";
@@ -85,6 +94,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [form, setForm]             = useState({});
   const [selectedBon, setSelectedBon] = useState(null);
   const [editingBon,  setEditingBon]  = useState(null);
+  const [waPanel,  setWaPanel]  = useState(false);
+  const [waMessage, setWaMessage] = useState("");
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
@@ -163,19 +174,28 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setSaving(false);
   };
 
+  const [indispoError, setIndispoError] = useState("");
+
   const createIndispo = async () => {
     if (!indispoData.techNom||!indispoData.dateDebut) return;
     setSaving(true);
+    setIndispoError("");
     try {
       const dataToSave = {
-        ...indispoData,
-        dateFin: indispoData.jourUnique ? indispoData.dateDebut : indispoData.dateFin,
+        techNom:   indispoData.techNom,
+        dateDebut: indispoData.dateDebut,
+        dateFin:   indispoData.jourUnique ? indispoData.dateDebut : indispoData.dateFin,
+        motif:     indispoData.motif,
       };
       await addDoc(collection(db,"indispos"), dataToSave);
       setIndispoFormOpen(false);
       setIndispoData({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
+      setIndispoError("");
       await fetchData();
-    } catch(e) {}
+    } catch(e) {
+      console.error("Erreur indispo:", e);
+      setIndispoError("Erreur : " + (e?.message || "Vérifiez les règles Firestore pour la collection 'indispos'"));
+    }
     setSaving(false);
   };
 
@@ -200,6 +220,76 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       await fetchData();
     } catch(e) { console.error("Erreur modification bon:", e); }
     setSaving(false);
+  };
+
+  // ── WhatsApp ───────────────────────────────────────────────────────────────
+
+  const TECH_EMOJIS = { "Dimitri":"🟢", "Georges":"🟠", "Equipe":"🔵" };
+
+  const generateWAMessage = (period) => {
+    const todayDate  = new Date();
+    const tomDate    = new Date(); tomDate.setDate(todayDate.getDate() + 1);
+    const todayStr   = fmtDate(todayDate);
+    const tomStr     = fmtDate(tomDate);
+    const w1start    = fmtDate(week1[0]);
+    const w1end      = fmtDate(week1[6]);
+
+    let title = "";
+    let filteredBons = [];
+
+    if (period === "today") {
+      title = `📅 *Planning Cocon+ — ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      filteredBons = bons.filter(b => b.datePrevue === todayStr);
+    } else if (period === "tomorrow") {
+      title = `📅 *Planning Cocon+ — ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      filteredBons = bons.filter(b => b.datePrevue === tomStr);
+    } else {
+      title = `📅 *Planning Cocon+ — Semaine du ${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"})} au ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}*`;
+      filteredBons = bons.filter(b => b.datePrevue >= w1start && b.datePrevue <= w1end);
+    }
+
+    filteredBons = filteredBons.sort((a,b) =>
+      (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||""))
+    );
+
+    if (filteredBons.length === 0) {
+      return `${title}\n\nAucune intervention prévue.`;
+    }
+
+    const techs = [...new Set(filteredBons.map(b => b.techNom).filter(Boolean))];
+    const lines = [title, ""];
+
+    techs.forEach(tech => {
+      const techBons = filteredBons.filter(b => b.techNom === tech);
+      const emoji = TECH_EMOJIS[tech] || "⚫";
+      lines.push(`${emoji} *${tech}*`);
+      techBons.forEach(b => {
+        const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
+        const créneau    = b.heureFinPrevue ? `${b.heurePrevue}→${b.heureFinPrevue}` : b.heurePrevue;
+        const client     = `${b.clientNom} ${b.clientPrenom||""}`.trim();
+        const villeStr   = ville ? ` · ${ville}` : "";
+        const datePrefix = period === "week"
+          ? new Date(b.datePrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})+" · "
+          : "";
+        lines.push(`• ${datePrefix}${créneau} · ${client} · ${b.type}${villeStr}`);
+      });
+      lines.push("");
+    });
+
+    const appUrl = window.location.origin;
+    lines.push(`🔗 ${appUrl}`);
+    lines.push("");
+    lines.push("_Cocon+ — 0596 73 66 66_");
+    return lines.join("\n");
+  };
+
+  const handleWAPeriod = (period) => {
+    const msg = generateWAMessage(period);
+    setWaMessage(msg);
+  };
+
+  const openWhatsApp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(waMessage)}`, "_blank");
   };
 
   const selectStyle = {
@@ -307,6 +397,61 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         <button className="btn-primary" style={{width:"100%",marginBottom:32,opacity:canSubmit?1:0.4}} disabled={saving||!canSubmit} onClick={createBon}>
           {saving?"Création…":"✅ Créer le bon d'intervention"}
         </button>
+      </div>
+    );
+  }
+
+  // ── PANNEAU WHATSAPP ──────────────────────────────────────────────────────
+  if (waPanel) {
+    const periods = [
+      { key:"today",    label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
+      { key:"tomorrow", label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
+      { key:"week",     label:"Cette semaine",  icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+    ];
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => { setWaPanel(false); setWaMessage(""); }}>← Retour</button>
+          <h2>Envoyer le planning</h2>
+        </div>
+
+        {/* Sélection période */}
+        {!waMessage && (
+          <>
+            <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:16}}>
+              Choisissez la période à partager avec l'équipe :
+            </p>
+            {periods.map(({ key, label, icon, sub }) => (
+              <div key={key} onClick={() => handleWAPeriod(key)}
+                style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:12,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"background .15s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="var(--color-background-secondary)"}
+                onMouseLeave={e=>e.currentTarget.style.background="var(--color-background-primary)"}>
+                <div style={{fontSize:28}}>{icon}</div>
+                <div>
+                  <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)"}}>{label}</div>
+                  <div style={{fontSize:11,color:"var(--color-text-secondary)",textTransform:"capitalize"}}>{sub}</div>
+                </div>
+                <div style={{marginLeft:"auto",fontSize:18,color:"#35B499"}}>→</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Prévisualisation du message */}
+        {waMessage && (
+          <>
+            <div style={{background:"#e9f5e9",border:"0.5px solid #c3e6cb",borderRadius:12,padding:"14px",marginBottom:14,fontFamily:"monospace",fontSize:12,lineHeight:1.7,color:"#1a1a1a",whiteSpace:"pre-wrap",wordBreak:"break-word",maxHeight:360,overflowY:"auto"}}>
+              {waMessage}
+            </div>
+            <button onClick={openWhatsApp}
+              style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+              💬 Ouvrir WhatsApp
+            </button>
+            <button className="btn-outline" style={{width:"100%"}} onClick={() => setWaMessage("")}>
+              ← Choisir une autre période
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -498,11 +643,16 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           disabled={saving||!canSave} onClick={createIndispo}>
           {saving?"Enregistrement…":"Enregistrer"}
         </button>
+        {indispoError && (
+          <p style={{color:"#e74c3c",fontSize:12,marginTop:10,padding:"8px 12px",background:"#fdecea",borderRadius:8,lineHeight:1.5}}>
+            ⚠️ {indispoError}
+          </p>
+        )}
       </div>
     );
   }
 
-  // ── GRILLE (composant interne) ─────────────────────────────────────────────
+  // ── GRILLE (composant interne — positionnement absolu) ────────────────────
   const WeekGrid = ({ days, label }) => (
     <div style={{marginBottom:24}}>
       <div style={{fontSize:11,fontWeight:600,color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"1.2px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
@@ -512,81 +662,133 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </span>
       </div>
       <div style={{overflowX:"auto",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-primary)"}}>
-        <div style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`,borderBottom:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-secondary)",minWidth:700}}>
-          <div style={{width:52}}/>
-          {days.map(day => {
-            const today   = isToday(day);
-            const dateStr = fmtDate(day);
-            const count   = bons.filter(b=>b.datePrevue===dateStr).length;
-            return (
-              <div key={dateStr} style={{padding:"8px 4px",textAlign:"center",borderLeft:"0.5px solid var(--color-border-tertiary)"}}>
-                <div style={{fontSize:10,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:500,textTransform:"capitalize",marginBottom:3}}>
-                  {day.toLocaleDateString("fr-FR",{weekday:"short"})}
-                </div>
-                <div style={{fontSize:16,fontWeight:800,color:today?"white":"var(--color-text-primary)",background:today?"#35B499":"transparent",borderRadius:"50%",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 4px"}}>
-                  {day.getDate()}
-                </div>
-                {count > 0 && <div style={{fontSize:9,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:600}}>{count} bon{count>1?"s":""}</div>}
-              </div>
-            );
-          })}
-        </div>
-        {HOURS.map(hour => (
-          <div key={hour} style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`,borderBottom:"0.5px solid var(--color-border-tertiary)",minWidth:700,minHeight:CELL_HEIGHT}}>
-            <div style={{padding:"6px 8px 0 0",textAlign:"right",fontSize:10,color:"var(--color-text-secondary)",borderRight:"0.5px solid var(--color-border-tertiary)",paddingTop:6}}>
-              {String(hour).padStart(2,"0")}h
-            </div>
+        <div style={{minWidth:700}}>
+
+          {/* ── En-tête jours ── */}
+          <div style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`,borderBottom:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-secondary)"}}>
+            <div style={{width:52}}/>
             {days.map(day => {
-              const dateStr = fmtDate(day);
-              const dayBons = getBonsForSlot(day, hour);
               const today   = isToday(day);
-              const indispo = isDayIndispo(dateStr);
+              const dateStr = fmtDate(day);
+              const count   = bons.filter(b=>b.datePrevue===dateStr).length;
               return (
-                <div key={dateStr} onClick={()=>handleCellClick(dateStr,hour)}
-                  style={{borderLeft:"0.5px solid var(--color-border-tertiary)",padding:"3px",minHeight:CELL_HEIGHT,
-                    background:indispo?"repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(0,0,0,0.025) 5px,rgba(0,0,0,0.025) 10px)":today?"rgba(53,180,153,0.03)":"transparent",
-                    cursor:isAdmin?"pointer":"default",position:"relative"}}>
-                  {dayBons.map(b => {
-                    const ville    = extractVille(b.adresseIntervention||b.clientAdresse||"");
-                    const color    = techColors[b.techNom]||"#35B499";
-                    const duration = getDurationHours(b.heurePrevue, b.heureFinPrevue);
-                    const blockH   = Math.max(CELL_HEIGHT - 8, Math.round(duration * CELL_HEIGHT) - 8);
-                    return (
-                      <div key={b.id} onClick={e=>handleBonClick(e,b)}
-                        style={{background:statutBg(b.statut),borderLeft:`3px solid ${color}`,borderRadius:"0 6px 6px 0",
-                          padding:"4px 6px",marginBottom:2,fontSize:10,lineHeight:1.4,overflow:"hidden",
-                          height:blockH,cursor:onOpenBon?"pointer":"default",transition:"opacity .15s",
-                          position:"relative",zIndex:1}}
-                        onMouseEnter={e=>{if(onOpenBon)e.currentTarget.style.opacity="0.75";}}
-                        onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
-                        <div style={{fontWeight:700,color:"var(--color-text-primary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {b.heurePrevue}{b.heureFinPrevue?` → ${b.heureFinPrevue}`:""} · {b.clientNom} {b.clientPrenom}
-                        </div>
-                        <div style={{color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:9}}>
-                          {b.type}
-                        </div>
-                        {ville && (
-                          <div style={{color,fontWeight:600,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            📍 {ville}
-                          </div>
-                        )}
-                        <span style={{display:"inline-block",marginTop:2,fontSize:8,padding:"1px 6px",borderRadius:20,
-                          background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#e8c9b8":"#d4f0ea",
-                          color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#1a7a65",
-                          fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
-                          {b.statut}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {isAdmin && dayBons.length===0 && !indispo && (
-                    <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#35B499",opacity:0.12,pointerEvents:"none"}}>+</div>
-                  )}
+                <div key={dateStr} style={{padding:"8px 4px",textAlign:"center",borderLeft:"0.5px solid var(--color-border-tertiary)"}}>
+                  <div style={{fontSize:10,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:500,textTransform:"capitalize",marginBottom:3}}>
+                    {day.toLocaleDateString("fr-FR",{weekday:"short"})}
+                  </div>
+                  <div style={{fontSize:16,fontWeight:800,color:today?"white":"var(--color-text-primary)",background:today?"#35B499":"transparent",borderRadius:"50%",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 4px"}}>
+                    {day.getDate()}
+                  </div>
+                  {count > 0 && <div style={{fontSize:9,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:600}}>{count} bon{count>1?"s":""}</div>}
                 </div>
               );
             })}
           </div>
-        ))}
+
+          {/* ── Corps : colonne heure + colonnes jours ── */}
+          <div style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`}}>
+
+            {/* Colonne heures */}
+            <div style={{position:"relative",height:GRID_HEIGHT,borderRight:"0.5px solid var(--color-border-tertiary)"}}>
+              {HOURS.map((hour, i) => (
+                <div key={hour} style={{
+                  position:"absolute", top: i * CELL_HEIGHT,
+                  right:6, fontSize:10, color:"var(--color-text-secondary)",
+                  lineHeight:`${CELL_HEIGHT}px`,
+                }}>
+                  {String(hour).padStart(2,"0")}h
+                </div>
+              ))}
+            </div>
+
+            {/* Colonnes jours */}
+            {days.map(day => {
+              const dateStr = fmtDate(day);
+              const dayBons = bons.filter(b => b.datePrevue === dateStr);
+              const today   = isToday(day);
+              const indispo = isDayIndispo(dateStr);
+
+              return (
+                <div key={dateStr} style={{
+                  position:"relative", height:GRID_HEIGHT,
+                  borderLeft:"0.5px solid var(--color-border-tertiary)",
+                  background: indispo
+                    ? "repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(0,0,0,0.025) 5px,rgba(0,0,0,0.025) 10px)"
+                    : today ? "rgba(53,180,153,0.03)" : "transparent",
+                }}>
+                  {/* Lignes horizontales par heure (cliquables) */}
+                  {HOURS.map((hour, i) => (
+                    <div key={hour}
+                      onClick={() => handleCellClick(dateStr, hour)}
+                      style={{
+                        position:"absolute", top: i * CELL_HEIGHT, left:0, right:0, height: CELL_HEIGHT,
+                        borderBottom:"0.5px solid var(--color-border-tertiary)",
+                        cursor: isAdmin ? "pointer" : "default",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                      }}>
+                      {isAdmin && !indispo && dayBons.length === 0 && (
+                        <div style={{fontSize:18,color:"#35B499",opacity:0.12,pointerEvents:"none"}}>+</div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Bons positionnés absolument selon heure */}
+                  {dayBons.map(b => {
+                    const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
+                    const color      = techColors[b.techNom]||"#35B499";
+                    const topOffset  = getTopOffset(b.heurePrevue);
+                    const duration   = getDurationHours(b.heurePrevue, b.heureFinPrevue);
+                    const blockH     = Math.max(28, duration * CELL_HEIGHT - 4);
+
+                    return (
+                      <div key={b.id}
+                        onClick={e => handleBonClick(e, b)}
+                        style={{
+                          position:"absolute",
+                          top: topOffset + 2,
+                          left: 3, right: 3,
+                          height: blockH,
+                          background: statutBg(b.statut),
+                          borderLeft:`3px solid ${color}`,
+                          borderRadius:"0 6px 6px 0",
+                          padding:"4px 6px",
+                          fontSize:10, lineHeight:1.4,
+                          overflow:"hidden",
+                          cursor:"pointer",
+                          zIndex:2,
+                          transition:"opacity .15s",
+                        }}
+                        onMouseEnter={e=>{e.currentTarget.style.opacity="0.75";}}
+                        onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
+                        <div style={{fontWeight:700,color:"var(--color-text-primary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {b.heurePrevue}{b.heureFinPrevue?` → ${b.heureFinPrevue}`:""} · {b.clientNom} {b.clientPrenom}
+                        </div>
+                        {blockH > 40 && (
+                          <div style={{color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:9}}>
+                            {b.type}
+                          </div>
+                        )}
+                        {blockH > 55 && ville && (
+                          <div style={{color,fontWeight:600,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            📍 {ville}
+                          </div>
+                        )}
+                        {blockH > 68 && (
+                          <span style={{display:"inline-block",marginTop:2,fontSize:8,padding:"1px 6px",borderRadius:20,
+                            background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#e8c9b8":"#d4f0ea",
+                            color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#1a7a65",
+                            fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
+                            {b.statut}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -596,11 +798,19 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     <div className="container">
       <div className="page-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <h2>Planning</h2>
-        {isAdmin && (
-          <button className="btn-primary" style={{padding:"9px 18px",fontSize:13}} onClick={handleAddButton}>
-            + Ajouter une intervention
-          </button>
-        )}
+        <div style={{display:"flex",gap:8}}>
+          {isAdmin && (
+            <button onClick={() => { setWaPanel(true); setWaMessage(""); }}
+              style={{background:"#25D366",color:"white",border:"none",borderRadius:8,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+              💬 WA
+            </button>
+          )}
+          {isAdmin && (
+            <button className="btn-primary" style={{padding:"9px 18px",fontSize:13}} onClick={handleAddButton}>
+              + Ajouter
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
