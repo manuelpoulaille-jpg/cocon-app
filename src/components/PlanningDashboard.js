@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection, getDocs, addDoc, deleteDoc, doc, Timestamp,
+  collection, getDocs, addDoc, deleteDoc, doc, updateDoc, Timestamp,
 } from "firebase/firestore";
 
 const TECH_COLORS_MAP = {
@@ -83,6 +83,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [saving, setSaving]         = useState(false);
   const [formStep, setFormStep]     = useState(null);
   const [form, setForm]             = useState({});
+  const [selectedBon, setSelectedBon] = useState(null);
+  const [editingBon,  setEditingBon]  = useState(null);
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
@@ -134,7 +136,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const handleBonClick = (e, bon) => {
     e.stopPropagation();
-    if (onOpenBon) onOpenBon(bon);
+    setSelectedBon(bon);
   };
 
   const createBon = async () => {
@@ -179,6 +181,25 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const deleteIndispo = async (id) => {
     try { await deleteDoc(doc(db,"indispos",id)); await fetchData(); } catch(e) {}
+  };
+
+  const saveEditBon = async () => {
+    if (!editingBon) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db,"bons",editingBon.id), {
+        datePrevue:     editingBon.datePrevue,
+        heurePrevue:    editingBon.heurePrevue,
+        heureFinPrevue: editingBon.heureFinPrevue || "",
+        techNom:        editingBon.techNom,
+        type:           editingBon.type,
+        types:          [editingBon.type],
+      });
+      setEditingBon(null);
+      setSelectedBon(null);
+      await fetchData();
+    } catch(e) { console.error("Erreur modification bon:", e); }
+    setSaving(false);
   };
 
   const selectStyle = {
@@ -285,6 +306,124 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <button className="btn-primary" style={{width:"100%",marginBottom:32,opacity:canSubmit?1:0.4}} disabled={saving||!canSubmit} onClick={createBon}>
           {saving?"Création…":"✅ Créer le bon d'intervention"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── PANNEAU BON EXISTANT ──────────────────────────────────────────────────
+  if (selectedBon && !editingBon) {
+    const ville    = extractVille(selectedBon.adresseIntervention||selectedBon.clientAdresse||"");
+    const color    = techColors[selectedBon.techNom] || "#35B499";
+    const termine  = selectedBon.statut === "terminé";
+    const duration = getDurationHours(selectedBon.heurePrevue, selectedBon.heureFinPrevue);
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setSelectedBon(null)}>← Retour</button>
+          <h2>Intervention</h2>
+          <span className="badge" style={{background:selectedBon.statut==="terminé"?"#35B499":selectedBon.statut==="en cours"?"#e8c9b8":"#d4f0ea",color:selectedBon.statut==="terminé"?"white":selectedBon.statut==="en cours"?"#6b4a31":"#1a7a65"}}>
+            {selectedBon.statut}
+          </span>
+        </div>
+
+        {/* Résumé */}
+        <div className="card" style={{marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:4,borderRadius:2,alignSelf:"stretch",background:color,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--color-text-primary)",marginBottom:2}}>
+                {selectedBon.clientNom} {selectedBon.clientPrenom}
+              </div>
+              {selectedBon.clientSociete && <div style={{fontSize:11,color:"#35B499",fontWeight:600,marginBottom:2}}>{selectedBon.clientSociete}</div>}
+              <div style={{fontSize:12,color:"var(--color-text-secondary)"}}>{selectedBon.type}</div>
+            </div>
+          </div>
+          <div className="info-row"><span>Date</span><b>{selectedBon.datePrevue}</b></div>
+          <div className="info-row">
+            <span>Créneau</span>
+            <b>{selectedBon.heurePrevue}{selectedBon.heureFinPrevue ? ` → ${selectedBon.heureFinPrevue}` : ""}{selectedBon.heureFinPrevue ? ` (${duration % 1 === 0 ? duration+"h" : duration.toFixed(1)+"h"})` : ""}</b>
+          </div>
+          <div className="info-row"><span>Collaborateur</span><b style={{color}}>{selectedBon.techNom}</b></div>
+          {ville && <div className="info-row"><span>Ville</span><b>📍 {ville}</b></div>}
+          <div className="info-row"><span>Réf.</span><b style={{color:"#35B499",fontSize:11}}>{selectedBon.ref}</b></div>
+        </div>
+
+        {/* Actions */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {!termine && isAdmin && (
+            <button className="btn-primary" onClick={() => setEditingBon({ ...selectedBon })}>
+              ✏️ Modifier le créneau
+            </button>
+          )}
+          {onOpenBon && (
+            <button className="btn-outline" onClick={() => { onOpenBon(selectedBon); setSelectedBon(null); }}>
+              📋 Voir le bon complet
+            </button>
+          )}
+          {termine && (
+            <p style={{fontSize:12,color:"#888",textAlign:"center",fontStyle:"italic"}}>
+              Ce bon est terminé — modification non disponible.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── FORMULAIRE MODIFICATION CRÉNEAU ───────────────────────────────────────
+  if (editingBon) {
+    const canSave = editingBon.datePrevue && editingBon.heurePrevue && editingBon.heureFinPrevue && editingBon.techNom && editingBon.type;
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setEditingBon(null)}>← Retour</button>
+          <h2>Modifier le créneau</h2>
+        </div>
+
+        <div className="card readonly" style={{marginBottom:12}}>
+          <div className="card-title">Bon concerné <span className="locked-badge">🔒 Infos client</span></div>
+          <div className="info-row"><span>Client</span><b>{editingBon.clientNom} {editingBon.clientPrenom}</b></div>
+          <div className="info-row"><span>Réf.</span><b style={{color:"#35B499"}}>{editingBon.ref}</b></div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Créneau</div>
+          <div className="field"><label>Date *</label>
+            <input type="date" min={rangeStart} max={rangeEnd}
+              value={editingBon.datePrevue||""}
+              onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
+          </div>
+          <div className="row2">
+            <div className="field"><label>Heure de début *</label>
+              <input type="time" value={editingBon.heurePrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,heurePrevue:e.target.value,heureFinPrevue:defaultHeureFinPrevue(e.target.value)}))} />
+            </div>
+            <div className="field"><label>Heure de fin *</label>
+              <input type="time" value={editingBon.heureFinPrevue||""} min={editingBon.heurePrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,heureFinPrevue:e.target.value}))} />
+            </div>
+          </div>
+          <div className="field"><label>Collaborateur *</label>
+            <select style={selectStyle} value={editingBon.techNom||""} onChange={e=>setEditingBon(b=>({...b,techNom:e.target.value}))}>
+              <option value="">Choisir…</option>
+              {techList.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Type d'intervention *</label>
+            <select style={selectStyle} value={editingBon.type||""} onChange={e=>setEditingBon(b=>({...b,type:e.target.value}))}>
+              <option value="">Choisir un type…</option>
+              {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <button className="btn-primary" style={{width:"100%",opacity:canSave?1:0.4,marginBottom:10}}
+          disabled={saving||!canSave} onClick={saveEditBon}>
+          {saving?"Sauvegarde…":"✅ Enregistrer les modifications"}
+        </button>
+        <button className="btn-outline" style={{width:"100%"}} onClick={() => setEditingBon(null)}>
+          Annuler
         </button>
       </div>
     );
