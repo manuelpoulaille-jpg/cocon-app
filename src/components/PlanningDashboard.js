@@ -226,60 +226,83 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const TECH_EMOJIS = { "Dimitri":"🟢", "Georges":"🟠", "Equipe":"🔵" };
 
-  const generateWAMessage = (period) => {
-    const todayDate  = new Date();
-    const tomDate    = new Date(); tomDate.setDate(todayDate.getDate() + 1);
-    const todayStr   = fmtDate(todayDate);
-    const tomStr     = fmtDate(tomDate);
-    const w1start    = fmtDate(week1[0]);
-    const w1end      = fmtDate(week1[6]);
+  const fmtHeure = (h) => {
+    if (!h) return "?h";
+    const [hh, mm] = h.split(":").map(Number);
+    return mm === 0 ? `${hh}h` : `${hh}h${String(mm).padStart(2,"0")}`;
+  };
 
-    let title = "";
+  const generateWAMessage = (period) => {
+    const todayDate = new Date();
+    const tomDate   = new Date(); tomDate.setDate(todayDate.getDate() + 1);
+    const todayStr  = fmtDate(todayDate);
+    const tomStr    = fmtDate(tomDate);
+    const w1start   = fmtDate(week1[0]);
+    const w1end     = fmtDate(week1[6]);
+
+    let header = "";
+    let days   = [];
     let filteredBons = [];
 
     if (period === "today") {
-      title = `📅 *Planning Cocon+ — ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      header = `📅 *Planning Cocon+ · ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
       filteredBons = bons.filter(b => b.datePrevue === todayStr);
+      days = [todayStr];
     } else if (period === "tomorrow") {
-      title = `📅 *Planning Cocon+ — ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
       filteredBons = bons.filter(b => b.datePrevue === tomStr);
+      days = [tomStr];
     } else {
-      title = `📅 *Planning Cocon+ — Semaine du ${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"})} au ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}*`;
+      const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      header = `📅 *Planning semaine · ${d1} – ${d2}*`;
       filteredBons = bons.filter(b => b.datePrevue >= w1start && b.datePrevue <= w1end);
+      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     }
-
-    filteredBons = filteredBons.sort((a,b) =>
-      (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||""))
-    );
 
     if (filteredBons.length === 0) {
-      return `${title}\n\nAucune intervention prévue.`;
+      return `${header}\n\nAucune intervention prévue.`;
     }
 
-    const techs = [...new Set(filteredBons.map(b => b.techNom).filter(Boolean))];
-    const lines = [title, ""];
+    const lines = [header, ""];
 
-    techs.forEach(tech => {
-      const techBons = filteredBons.filter(b => b.techNom === tech);
-      const emoji = TECH_EMOJIS[tech] || "⚫";
-      lines.push(`${emoji} *${tech}*`);
-      techBons.forEach(b => {
-        const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
-        const créneau    = b.heureFinPrevue ? `${b.heurePrevue}→${b.heureFinPrevue}` : b.heurePrevue;
-        const client     = `${b.clientNom} ${b.clientPrenom||""}`.trim();
-        const villeStr   = ville ? ` · ${ville}` : "";
-        const datePrefix = period === "week"
-          ? new Date(b.datePrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})+" · "
-          : "";
-        lines.push(`• ${datePrefix}${créneau} · ${client} · ${b.type}${villeStr}`);
+    days.forEach(dateStr => {
+      const dayBons = filteredBons
+        .filter(b => b.datePrevue === dateStr)
+        .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
+      if (dayBons.length === 0) return;
+
+      // En-tête jour pour la vue semaine
+      if (period === "week") {
+        const d = new Date(dateStr + "T12:00:00");
+        const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
+        lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
+      }
+
+      dayBons.forEach(b => {
+        const emoji  = TECH_EMOJIS[b.techNom] || "⚫";
+        const heure  = fmtHeure(b.heurePrevue);
+        const client = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
+        const ville  = extractVille(b.adresseIntervention||b.clientAdresse||"");
+        const villeStr = ville ? ` · ${ville}` : "";
+        lines.push(`${emoji} ${heure} ${client} → ${b.type}${villeStr}`);
       });
-      lines.push("");
+
+      if (period === "week") lines.push("");
     });
 
-    const appUrl = window.location.origin;
-    lines.push(`🔗 ${appUrl}`);
+    // Résumé
+    const nbJours = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
+    const resume  = period === "week"
+      ? `${filteredBons.length} intervention${filteredBons.length>1?"s":""} · ${nbJours} jour${nbJours>1?"s":""}`
+      : `${filteredBons.length} intervention${filteredBons.length>1?"s":""}`;
+
+    lines.push("━━━━━━━━━━━━━");
+    lines.push(resume);
+    lines.push(`🔗 ${window.location.origin}`);
     lines.push("");
-    lines.push("_Cocon+ — 0596 73 66 66_");
+    lines.push("_Cocon+ · 0596 73 66 66_");
+
     return lines.join("\n");
   };
 
