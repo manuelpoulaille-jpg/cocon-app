@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
+  const WEBHOOK = "https://script.google.com/macros/s/AKfycbwMi5xm1mvJ8CTL-5pkG0t17miLcDYK1UoDqJIOSCEmRlOlk8tmQZVa922rUdpUilVR/exec";
 
   try {
     const response = await fetch(WEBHOOK, {
