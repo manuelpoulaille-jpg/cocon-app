@@ -259,6 +259,8 @@ export default function AdminDashboard({ user, onLogout }) {
       setDriveStatus("error");
     }
   };
+
+  const sendBonsToDrive=async()=>{
     const aEnvoyer=bons.filter(b=>b.statut==="terminé"&&!b.driveEnvoye);
     if(!aEnvoyer.length){alert("Tous les bons terminés ont déjà été envoyés !");return;}
     setDriveSending(true);setDriveProgress({total:aEnvoyer.length,done:0,errors:0});
