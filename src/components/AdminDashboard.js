@@ -124,7 +124,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [editForm,setEditForm]=useState({});
   const [saving,setSaving]=useState(false);
   const [msg,setMsg]=useState("");
-  const [driveProgress,setDriveProgress]=useState(null);
+  const [driveStatus, setDriveStatus] = useState("");
   const [driveSending,setDriveSending]=useState(false);
   const [period,setPeriod]=useState("jour");
   const [form,setForm]=useState({...EMPTY_FORM});
@@ -216,7 +216,49 @@ export default function AdminDashboard({ user, onLogout }) {
     setEditMode(false);fetchBons();setSaving(false);
   };
 
-  const sendBonsToDrive=async()=>{
+  const sendSingleBonToDrive = async (bon) => {
+    setDriveStatus("sending");
+    try {
+      const uri = await downloadPDF(bon, false);
+      const nom = (bon.ref + "_" + (bon.clientSociete || bon.clientNom + "_" + bon.clientPrenom) + "_" + (bon.datePrevue || "") + ".pdf")
+        .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
+
+      const response = await fetch("/api/drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdf: uri.split(",")[1],
+          nom,
+          ref:                bon.ref,
+          numDevis:           bon.numDevis || "",
+          clientNom:          bon.clientNom,
+          clientPrenom:       bon.clientPrenom,
+          clientTel:          bon.clientTel || "",
+          clientEmail:        bon.clientEmail || "",
+          adresseIntervention:bon.adresseIntervention || bon.clientAdresse || "",
+          type:               bon.type,
+          datePrevue:         bon.datePrevue,
+          heurePrevue:        bon.heurePrevue,
+          heureArrivee:       bon.heureArrivee ? new Date(bon.heureArrivee.toDate()).toLocaleString("fr-FR") : "",
+          heureFin:           bon.heureFin    ? new Date(bon.heureFin.toDate()).toLocaleString("fr-FR")    : "",
+          duree:              calcDuree(bon.heureArrivee, bon.heureFin),
+          techNom:            bon.techNom,
+          obsCocon:           bon.obsCocon || "",
+          obsClient:          bon.obsClient || "",
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || "Erreur inconnue");
+
+      await updateDoc(doc(db, "bons", bon.id), { driveEnvoye: true });
+      setSelected({ ...bon, driveEnvoye: true });
+      setDriveStatus("sent");
+    } catch(e) {
+      console.error("Drive error:", e);
+      setDriveStatus("error");
+    }
+  };
     const aEnvoyer=bons.filter(b=>b.statut==="terminé"&&!b.driveEnvoye);
     if(!aEnvoyer.length){alert("Tous les bons terminés ont déjà été envoyés !");return;}
     setDriveSending(true);setDriveProgress({total:aEnvoyer.length,done:0,errors:0});
@@ -428,7 +470,26 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
           </div>
         )}
-        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}><button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>{selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Demander un avis Google</button>}</div>}
+        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}>
+          <button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>
+          <button
+            onClick={() => sendSingleBonToDrive(selected)}
+            disabled={driveStatus === "sending" || driveStatus === "sent" || selected.driveEnvoye}
+            style={{
+              flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              background: selected.driveEnvoye || driveStatus==="sent" ? "#e8f5e9" : driveStatus==="error" ? "#fdecea" : "#e8f0fe",
+              color: selected.driveEnvoye || driveStatus==="sent" ? "#1a7a45" : driveStatus==="error" ? "#c0392b" : "#185FA5",
+              border: `0.5px solid ${selected.driveEnvoye || driveStatus==="sent" ? "#a5d6a7" : driveStatus==="error" ? "#f5c6cb" : "#90caf9"}`,
+              padding:"12px 16px", borderRadius:10, cursor: selected.driveEnvoye || driveStatus==="sending" || driveStatus==="sent" ? "default" : "pointer",
+              fontSize:14, fontWeight:600, opacity: driveStatus==="sending" ? 0.7 : 1,
+            }}>
+            {driveStatus==="sending" ? "⏳ Envoi…"
+              : (selected.driveEnvoye || driveStatus==="sent") ? "✅ Envoyé Drive"
+              : driveStatus==="error" ? "❌ Réessayer"
+              : "📤 Envoyer Drive"}
+          </button>
+          {selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Avis Google</button>}
+        </div>}
       </div>
     );
 
