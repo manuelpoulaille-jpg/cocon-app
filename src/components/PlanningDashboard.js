@@ -123,9 +123,17 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const getBonsForSlot = (day, hour) => {
     const dateStr = fmtDate(day);
     return bons.filter(b => {
-      if (b.datePrevue !== dateStr) return false;
-      const h = parseInt((b.heurePrevue||"0:00").split(":")[0]);
-      return h === hour;
+      // Bon multi-jours : apparaît si dateStr est dans l'intervalle
+      const start = b.datePrevue;
+      const end   = b.dateFinPrevue || b.datePrevue;
+      if (dateStr < start || dateStr > end) return false;
+      // Pour l'heure : on ne filtre par heure que sur le jour de début
+      if (dateStr === start) {
+        const h = parseInt((b.heurePrevue||"0:00").split(":")[0]);
+        return h === hour;
+      }
+      // Sur les jours suivants, afficher dans le premier créneau (7h)
+      return hour === 7;
     });
   };
 
@@ -162,7 +170,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         adresseIntervention:form.adresseIntervention||"", clientAdresse:form.adresseIntervention||"",
         demandeClient:form.demandeClient||"", numDevis:form.numDevis||"",
         signataire:form.signataire||"", types:[form.type], type:form.type,
-        datePrevue:form.datePrevue, heurePrevue:form.heurePrevue, heureFinPrevue:form.heureFinPrevue||"", techNom:form.techNom, techId:"",
+        datePrevue:form.datePrevue, dateFinPrevue:form.dateFinPrevue||"", heurePrevue:form.heurePrevue, heureFinPrevue:form.heureFinPrevue||"", techNom:form.techNom, techId:"",
         statut:"planifié", createdAt:Timestamp.now(),
         heureArrivee:null, heureFin:null, obsCocon:"", obsClient:"",
         signatureTech:null, signatureClient:null, emailEnvoye:false,
@@ -209,6 +217,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     try {
       await updateDoc(doc(db,"bons",editingBon.id), {
         datePrevue:     editingBon.datePrevue,
+        dateFinPrevue:  editingBon.dateFinPrevue || "",
         heurePrevue:    editingBon.heurePrevue,
         heureFinPrevue: editingBon.heureFinPrevue || "",
         techNom:        editingBon.techNom,
@@ -239,6 +248,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const tomStr    = fmtDate(tomDate);
     const w1start   = fmtDate(week1[0]);
     const w1end     = fmtDate(week1[6]);
+    const w2start   = fmtDate(week2[0]);
+    const w2end     = fmtDate(week2[6]);
 
     let header = "";
     let days   = [];
@@ -252,6 +263,12 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
       filteredBons = bons.filter(b => b.datePrevue === tomStr);
       days = [tomStr];
+    } else if (period === "next_week") {
+      const d1 = week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const d2 = week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      header = `📅 *Planning semaine prochaine · ${d1} – ${d2}*`;
+      filteredBons = bons.filter(b => b.datePrevue >= w2start && b.datePrevue <= w2end);
+      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     } else {
       const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
@@ -273,7 +290,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       if (dayBons.length === 0) return;
 
       // En-tête jour pour la vue semaine
-      if (period === "week") {
+      if (period === "week" || period === "next_week") {
         const d = new Date(dateStr + "T12:00:00");
         const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
         lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
@@ -293,7 +310,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
     // Résumé
     const nbJours = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
-    const resume  = period === "week"
+    const resume  = (period === "week" || period === "next_week")
       ? `${filteredBons.length} intervention${filteredBons.length>1?"s":""} · ${nbJours} jour${nbJours>1?"s":""}`
       : `${filteredBons.length} intervention${filteredBons.length>1?"s":""}`;
 
@@ -333,8 +350,13 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <div className="card">
           <div className="card-title">Créneau &amp; intervention</div>
-          <div className="field"><label>Date *</label>
-            <input type="date" min={rangeStart} max={rangeEnd} value={form.datePrevue||""} onChange={e=>setForm(f=>({...f,datePrevue:e.target.value}))} />
+          <div className="row2">
+            <div className="field"><label>Date de début *</label>
+              <input type="date" min={rangeStart} max={rangeEnd} value={form.datePrevue||""} onChange={e=>setForm(f=>({...f,datePrevue:e.target.value,dateFinPrevue:f.dateFinPrevue&&f.dateFinPrevue<e.target.value?e.target.value:f.dateFinPrevue}))} />
+            </div>
+            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel)</span></label>
+              <input type="date" min={form.datePrevue||rangeStart} max={rangeEnd} value={form.dateFinPrevue||""} onChange={e=>setForm(f=>({...f,dateFinPrevue:e.target.value}))} />
+            </div>
           </div>
           <div className="row2">
             <div className="field"><label>Heure de début *</label>
@@ -377,7 +399,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <div className="card readonly" style={{marginBottom:12}}>
           <div className="card-title">Récapitulatif <span className="locked-badge">🔒 Étape 1</span></div>
-          <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel} · {form.heurePrevue} → {form.heureFinPrevue}</b></div>
+          <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel}{form.dateFinPrevue && form.dateFinPrevue !== form.datePrevue ? ` → ${new Date(form.dateFinPrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}` : ""} · {form.heurePrevue} → {form.heureFinPrevue}</b></div>
           <div className="info-row"><span>Type</span><b>{form.type}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{form.techNom}</b></div>
         </div>
@@ -427,9 +449,10 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   // ── PANNEAU WHATSAPP ──────────────────────────────────────────────────────
   if (waPanel) {
     const periods = [
-      { key:"today",    label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
-      { key:"tomorrow", label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
-      { key:"week",     label:"Cette semaine",  icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"today",     label:"Aujourd'hui",      icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
+      { key:"tomorrow",  label:"Demain",            icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
+      { key:"week",      label:"Cette semaine",     icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"next_week", label:"Semaine prochaine", icon:"📋", sub: `${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
     ];
     return (
       <div className="container">
@@ -507,7 +530,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
               <div style={{fontSize:12,color:"var(--color-text-secondary)"}}>{selectedBon.type}</div>
             </div>
           </div>
-          <div className="info-row"><span>Date</span><b>{selectedBon.datePrevue}</b></div>
+          <div className="info-row"><span>Date</span><b>{selectedBon.datePrevue}{selectedBon.dateFinPrevue && selectedBon.dateFinPrevue !== selectedBon.datePrevue ? ` → ${selectedBon.dateFinPrevue}` : ""}</b></div>
           <div className="info-row">
             <span>Créneau</span>
             <b>{selectedBon.heurePrevue}{selectedBon.heureFinPrevue ? ` → ${selectedBon.heureFinPrevue}` : ""}{selectedBon.heureFinPrevue ? ` (${duration % 1 === 0 ? duration+"h" : duration.toFixed(1)+"h"})` : ""}</b>
@@ -557,10 +580,17 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
         <div className="card">
           <div className="card-title">Créneau</div>
-          <div className="field"><label>Date *</label>
-            <input type="date" min={rangeStart} max={rangeEnd}
-              value={editingBon.datePrevue||""}
-              onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
+          <div className="row2">
+            <div className="field"><label>Date de début *</label>
+              <input type="date" min={rangeStart} max={rangeEnd}
+                value={editingBon.datePrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
+            </div>
+            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel)</span></label>
+              <input type="date" min={editingBon.datePrevue||rangeStart} max={rangeEnd}
+                value={editingBon.dateFinPrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,dateFinPrevue:e.target.value}))} />
+            </div>
           </div>
           <div className="row2">
             <div className="field"><label>Heure de début *</label>
@@ -693,7 +723,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             {days.map(day => {
               const today   = isToday(day);
               const dateStr = fmtDate(day);
-              const count   = bons.filter(b=>b.datePrevue===dateStr).length;
+              const count   = bons.filter(b => { const s = b.datePrevue; const e = b.dateFinPrevue || b.datePrevue; return dateStr >= s && dateStr <= e; }).length;
               return (
                 <div key={dateStr} style={{padding:"8px 4px",textAlign:"center",borderLeft:"0.5px solid var(--color-border-tertiary)"}}>
                   <div style={{fontSize:10,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:500,textTransform:"capitalize",marginBottom:3}}>
@@ -727,7 +757,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             {/* Colonnes jours */}
             {days.map(day => {
               const dateStr = fmtDate(day);
-              const dayBons = bons.filter(b => b.datePrevue === dateStr);
+              const dayBons = bons.filter(b => {
+                const start = b.datePrevue;
+                const end   = b.dateFinPrevue || b.datePrevue;
+                return dateStr >= start && dateStr <= end;
+              });
               const today   = isToday(day);
               const indispo = isDayIndispo(dateStr);
 
@@ -759,9 +793,22 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                   {dayBons.map(b => {
                     const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
                     const color      = techColors[b.techNom]||"#35B499";
-                    const topOffset  = getTopOffset(b.heurePrevue);
-                    const duration   = getDurationHours(b.heurePrevue, b.heureFinPrevue);
-                    const blockH     = Math.max(28, duration * CELL_HEIGHT - 4);
+                    const isMultiDay = b.dateFinPrevue && b.dateFinPrevue !== b.datePrevue;
+                    const isFirstDay = b.datePrevue === dateStr;
+                    const topOffset  = isFirstDay ? getTopOffset(b.heurePrevue) : 2;
+                    const duration   = isFirstDay ? getDurationHours(b.heurePrevue, b.heureFinPrevue) : getDurationHours("07:00","18:00");
+                    const blockH     = isFirstDay ? Math.max(28, duration * CELL_HEIGHT - 4) : GRID_HEIGHT - 4;
+
+                    // Calcul jour X/N pour multi-jours
+                    let dayLabel = null;
+                    if (isMultiDay) {
+                      const start = new Date(b.datePrevue + "T12:00:00");
+                      const cur   = new Date(dateStr + "T12:00:00");
+                      const end   = new Date(b.dateFinPrevue + "T12:00:00");
+                      const total = Math.round((end - start) / 86400000) + 1;
+                      const idx   = Math.round((cur - start) / 86400000) + 1;
+                      dayLabel = `Jour ${idx}/${total}`;
+                    }
 
                     return (
                       <div key={b.id}
@@ -784,8 +831,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                         onMouseEnter={e=>{e.currentTarget.style.opacity="0.75";}}
                         onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
                         <div style={{fontWeight:700,color:"var(--color-text-primary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {b.heurePrevue}{b.heureFinPrevue?` → ${b.heureFinPrevue}`:""} · {b.clientNom} {b.clientPrenom}
+                          {isFirstDay ? `${b.heurePrevue}${b.heureFinPrevue?` → ${b.heureFinPrevue}`:""}` : "—"} · {b.clientNom} {b.clientPrenom}
                         </div>
+                        {dayLabel && (
+                          <div style={{fontSize:9,fontWeight:700,color,marginTop:1}}>{dayLabel}</div>
+                        )}
                         {blockH > 40 && (
                           <div style={{color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:9}}>
                             {b.type}
