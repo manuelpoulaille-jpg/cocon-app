@@ -29,12 +29,14 @@ const getWeekFrom = (monday) =>
   });
 
 const getCurrentMonday = () => {
-  const today = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Martinique" }));
+  // Récupère la date actuelle en Martinique sous forme "YYYY-MM-DD"
+  const todayStr = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
+  // Utilise midi (T12:00:00) pour éviter tout décalage de jour lors des conversions timezone
+  const today = new Date(todayStr + "T12:00:00");
   const day = today.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   const monday = new Date(today);
   monday.setDate(today.getDate() + diff);
-  monday.setHours(0, 0, 0, 0);
   return monday;
 };
 
