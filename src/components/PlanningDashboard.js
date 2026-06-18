@@ -103,6 +103,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [editingBon,  setEditingBon]  = useState(null);
   const [waPanel,  setWaPanel]  = useState(false);
   const [waMessage, setWaMessage] = useState("");
+  const [waNextWeekBons, setWaNextWeekBons] = useState([]);
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
@@ -252,7 +253,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     return mm === 0 ? `${hh}h` : `${hh}h${String(mm).padStart(2,"0")}`;
   };
 
-  const generateWAMessage = (period) => {
+  const generateWAMessage = (period, nextWeekBons = []) => {
     const todayDate = new Date();
     const tomDate   = new Date(); tomDate.setDate(todayDate.getDate() + 1);
     const todayStr  = fmtDate(todayDate);
@@ -270,6 +271,17 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
       filteredBons = bons.filter(b => b.datePrevue === tomStr);
       days = [tomStr];
+    } else if (period === "next_week") {
+      const nextM   = getMonday(weekOffset + 1);
+      const w2      = getWeekFrom(nextM);
+      const w2start = fmtDate(w2[0]);
+      const w2end   = fmtDate(w2[6]);
+      const d1 = w2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const d2 = w2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const nwLabel = weekOffset === 0 ? "semaine prochaine" : weekOffset === -1 ? "semaine en cours" : `semaine du ${d1}`;
+      header = `📅 *Planning Cocon+ · ${nwLabel.charAt(0).toUpperCase()+nwLabel.slice(1)} · ${d1} – ${d2}*`;
+      filteredBons = nextWeekBons;
+      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     } else {
       const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
@@ -291,7 +303,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
       if (dayBons.length === 0) return;
 
-      if (period === "week") {
+      if (period === "week" || period === "next_week") {
         const d = new Date(dateStr + "T12:00:00");
         const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
         lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
@@ -308,13 +320,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         lines.push(`${prefix} ${heure} ${client} → ${b.type}${villeStr}`);
       });
 
-      if (period === "week") lines.push("");
+      if (period === "week" || period === "next_week") lines.push("");
     });
 
     // Résumé
     const nbJours  = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
     const nbRetouches = filteredBons.filter(b => b.isRetouche).length;
-    const resumeBase = (period === "week")
+    const isMultiDay = period === "week" || period === "next_week";
+    const resumeBase = isMultiDay
       ? `${filteredBons.length} intervention${filteredBons.length>1?"s":""} · ${nbJours} jour${nbJours>1?"s":""}`
       : `${filteredBons.length} intervention${filteredBons.length>1?"s":""}`;
     const resumeRetouche = nbRetouches > 0 ? ` (dont ${nbRetouches} retouche${nbRetouches>1?"s":""})` : "";
@@ -332,8 +345,20 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     return lines.join("\n");
   };
 
-  const handleWAPeriod = (period) => {
-    const msg = generateWAMessage(period);
+  const handleWAPeriod = async (period) => {
+    let nextWeekBons = [];
+    if (period === "next_week") {
+      const nextM   = getMonday(weekOffset + 1);
+      const w2      = getWeekFrom(nextM);
+      const w2start = fmtDate(w2[0]);
+      const w2end   = fmtDate(w2[6]);
+      try {
+        const snap = await getDocs(collection(db,"bons"));
+        const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
+        nextWeekBons = all.filter(b => b.datePrevue >= w2start && b.datePrevue <= w2end);
+      } catch(e) {}
+    }
+    const msg = generateWAMessage(period, nextWeekBons);
     setWaMessage(msg);
   };
 
@@ -461,11 +486,15 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── PANNEAU WHATSAPP ──────────────────────────────────────────────────────
   if (waPanel) {
+    const nextMonday = getMonday(weekOffset + 1);
+    const week2 = getWeekFrom(nextMonday);
     const weekLabel = weekOffset === 0 ? "Semaine en cours" : weekOffset === 1 ? "Semaine prochaine" : weekOffset === -1 ? "Semaine dernière" : `Sem. du ${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}`;
+    const nextWeekLabel = weekOffset === 0 ? "Semaine prochaine" : weekOffset === -1 ? "Semaine en cours" : `Sem. du ${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}`;
     const periods = [
-      { key:"today",    label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
-      { key:"tomorrow", label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
-      { key:"week",     label:weekLabel,        icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"today",     label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
+      { key:"tomorrow",  label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
+      { key:"week",      label:weekLabel,        icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"next_week", label:nextWeekLabel,    icon:"📋", sub: `${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
     ];
     return (
       <div className="container">
