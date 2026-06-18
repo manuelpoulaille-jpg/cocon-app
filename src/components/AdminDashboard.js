@@ -18,7 +18,7 @@ const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_c
 const EMPTY_FORM = {
   clientSociete:"",clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
-  types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
+  types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",isRetouche:false,
 };
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
@@ -74,6 +74,10 @@ const SCOPED_CSS = `
 .ca-badge.planifie{background:#e1f5ee!important;color:#0e6b50!important}
 .ca-badge.encours{background:#f5e8d8!important;color:#6b4a31!important}
 .ca-badge.termine{background:#35B499!important;color:white!important}
+.ca-badge.fact-afacturer{background:#fff3cd!important;color:#856404!important}
+.ca-badge.fact-facture{background:#d1ecf1!important;color:#0c5460!important}
+.ca-badge.fact-paye{background:#d4edda!important;color:#155724!important}
+.ca-badge.retouche{background:#fdebd0!important;color:#a04000!important}
 .ca-btn-pdf{font-size:10px!important;padding:4px 10px!important;border-radius:6px!important;cursor:pointer!important;background:#e1f5ee!important;color:#0e6b50!important;border:0.5px solid #a0dece!important;font-weight:500!important;margin-right:4px!important}
 .ca-btn-wa{font-size:10px!important;padding:4px 10px!important;border-radius:6px!important;cursor:pointer!important;background:#e8f9ee!important;color:#1a7a45!important;border:0.5px solid #a0d8b0!important;font-weight:500!important}
 .ca-empty{padding:20px 14px!important;font-size:13px!important;color:#aaa!important;text-align:center!important}
@@ -112,6 +116,9 @@ const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="term
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
+const FACT_LABELS={"a_facturer":"À facturer","facture":"Facturé","paye":"Payé"};
+const FACT_ICONS={"a_facturer":"🟡","facture":"🔵","paye":"✅"};
+const scFacture=(s)=>s==="a_facturer"?"fact-afacturer":s==="facture"?"fact-facture":s==="paye"?"fact-paye":"";
 
 export default function AdminDashboard({ user, onLogout }) {
   const [bons,setBons]=useState([]);
@@ -124,7 +131,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [editForm,setEditForm]=useState({});
   const [saving,setSaving]=useState(false);
   const [msg,setMsg]=useState("");
-  const [driveStatus, setDriveStatus] = useState("");
+  const [driveProgress,setDriveProgress]=useState(null);
   const [driveSending,setDriveSending]=useState(false);
   const [period,setPeriod]=useState("jour");
   const [form,setForm]=useState({...EMPTY_FORM});
@@ -177,6 +184,8 @@ export default function AdminDashboard({ user, onLogout }) {
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
         numVisite:form.numVisite||"1",
+        isRetouche:form.isRetouche||false,
+        statutFacture:"a_facturer",
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
@@ -192,13 +201,21 @@ export default function AdminDashboard({ user, onLogout }) {
     await updateDoc(doc(db,"bons",selected.id),{
       heureFin:now,
       statut:"terminé",
-      // Pas d'email - terminé par admin
+      statutFacture:"facture",
     });
-    const updated={...selected,heureFin:now,statut:"terminé"};
+    const updated={...selected,heureFin:now,statut:"terminé",statutFacture:"facture"};
     setSelected(updated);
     await fetchBons();
     setSaving(false);
     flashMsg("✅ Bon terminé par l'admin.");
+  };
+
+  const updateStatutFacture=async(newStatut)=>{
+    await updateDoc(doc(db,"bons",selected.id),{statutFacture:newStatut});
+    const updated={...selected,statutFacture:newStatut};
+    setSelected(updated);
+    setBons(prev=>prev.map(b=>b.id===selected.id?{...b,statutFacture:newStatut}:b));
+    flashMsg("✅ Statut de facturation mis à jour.");
   };
 
   const saveEdit=async()=>{
@@ -211,53 +228,10 @@ export default function AdminDashboard({ user, onLogout }) {
       numDevis:editForm.numDevis,signataire:editForm.signataire||"",
       datePrevue:editForm.datePrevue,heurePrevue:editForm.heurePrevue,techNom:editForm.techId,
       types:editForm.types,type:editForm.types.join(", "),
+      isRetouche:editForm.isRetouche||false,
     });
-    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", ")});
+    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", "),isRetouche:editForm.isRetouche||false});
     setEditMode(false);fetchBons();setSaving(false);
-  };
-
-  const sendSingleBonToDrive = async (bon) => {
-    setDriveStatus("sending");
-    try {
-      const uri = await downloadPDF(bon, false);
-      const nom = (bon.ref + "_" + (bon.clientSociete || bon.clientNom + "_" + bon.clientPrenom) + "_" + (bon.datePrevue || "") + ".pdf")
-        .replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
-
-      const response = await fetch("/api/drive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pdf: uri.split(",")[1],
-          nom,
-          ref:                bon.ref,
-          numDevis:           bon.numDevis || "",
-          clientNom:          bon.clientNom,
-          clientPrenom:       bon.clientPrenom,
-          clientTel:          bon.clientTel || "",
-          clientEmail:        bon.clientEmail || "",
-          adresseIntervention:bon.adresseIntervention || bon.clientAdresse || "",
-          type:               bon.type,
-          datePrevue:         bon.datePrevue,
-          heurePrevue:        bon.heurePrevue,
-          heureArrivee:       bon.heureArrivee ? new Date(bon.heureArrivee.toDate()).toLocaleString("fr-FR") : "",
-          heureFin:           bon.heureFin    ? new Date(bon.heureFin.toDate()).toLocaleString("fr-FR")    : "",
-          duree:              calcDuree(bon.heureArrivee, bon.heureFin),
-          techNom:            bon.techNom,
-          obsCocon:           bon.obsCocon || "",
-          obsClient:          bon.obsClient || "",
-        }),
-      });
-
-      const result = await response.json();
-      if (!result.success) throw new Error(result.error || "Erreur inconnue");
-
-      await updateDoc(doc(db, "bons", bon.id), { driveEnvoye: true });
-      setSelected({ ...bon, driveEnvoye: true });
-      setDriveStatus("sent");
-    } catch(e) {
-      console.error("Drive error:", e);
-      setDriveStatus("error");
-    }
   };
 
   const sendBonsToDrive=async()=>{
@@ -326,18 +300,18 @@ export default function AdminDashboard({ user, onLogout }) {
     const q=search.toLowerCase();
     const ms=!q||(b.clientNom+" "+b.clientPrenom).toLowerCase().includes(q)||b.ref?.toLowerCase().includes(q)||b.numDevis?.toLowerCase().includes(q)||b.type?.toLowerCase().includes(q)||b.techNom?.toLowerCase().includes(q)||b.statut?.toLowerCase().includes(q);
     const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);
-    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e);
+    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="a_facturer"&&b.statutFacture==="a_facturer")||(filter==="facture"&&b.statutFacture==="facture")||(filter==="paye"&&b.statutFacture==="paye");
     return ms&&mf;
   });
 
   const BonsTable=({data,showDate=false})=>(
     <div className="ca-table-wrap">
       <table className="ca-table">
-        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th>Facturation</th><th></th></tr></thead>
         <tbody>
           {data.map(b=>(
             <tr key={b.id} onClick={()=>{setSelected(b);setView("detail");}}>
-              <td><span className="ca-ref">{b.ref}</span></td>
+              <td><span className="ca-ref">{b.ref}</span>{b.isRetouche&&<span className="ca-badge retouche" style={{marginLeft:5}}>🔧 Retouche</span>}</td>
               {showDate&&<td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{fmtDate(b.datePrevue)}</td>}
               <td>{b.clientSociete&&<span style={{display:"block",fontSize:10,color:"#35B499",fontWeight:600}}>{b.clientSociete}</span>}<span style={{fontWeight:500}}>{b.clientNom} {b.clientPrenom}</span><span style={{display:"block",fontSize:10,color:"#888"}}>{b.clientTel}</span></td>
               <td style={{fontSize:11,color:"#555"}}>{b.type}</td>
@@ -345,6 +319,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <td style={{fontSize:12}}>{b.techNom}</td>
               <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
               <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
+              <td>{b.statutFacture&&<span className={`ca-badge ${scFacture(b.statutFacture)}`}>{FACT_ICONS[b.statutFacture]} {FACT_LABELS[b.statutFacture]}</span>}</td>
               <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
               </td>
@@ -363,7 +338,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
-    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true} onOpenBon={(bon)=>{setSelected(bon);setView("detail");}}/></div>;
+    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -377,6 +352,10 @@ export default function AdminDashboard({ user, onLogout }) {
             <div className="row2"><div className="field"><label>N° Devis</label><input value={form.numDevis} onChange={e=>setForm({...form,numDevis:e.target.value})} placeholder="DEV-2026-001"/></div><div className="field"><label>Date prévue</label><input type="date" required value={form.datePrevue} onChange={e=>setForm({...form,datePrevue:e.target.value})}/></div></div>
             <div className="row2"><div className="field"><label>N° visite</label><input value={form.numVisite} onChange={e=>setForm({...form,numVisite:e.target.value})} placeholder="1"/></div><div className="field"><label>Montant facturé (€)</label><input type="number" step="0.01" value={form.montantFacture} onChange={e=>setForm({...form,montantFacture:e.target.value})}/></div></div>
             <div className="row2"><div className="field"><label>Heure prévue</label><input type="time" required value={form.heurePrevue} onChange={e=>setForm({...form,heurePrevue:e.target.value})}/></div><div className="field"><label>Collaborateur</label><select required value={form.techId} onChange={e=>setForm({...form,techId:e.target.value})}><option value="">-- Sélectionner --</option><option>Dimitri</option><option>Georges</option><option>Equipe</option></select></div></div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8,padding:"10px 0",borderTop:"0.5px solid var(--color-border-tertiary, #e8e5e0)"}}>
+              <input type="checkbox" id="isRetouche" checked={!!form.isRetouche} onChange={e=>setForm({...form,isRetouche:e.target.checked})} style={{width:16,height:16,accentColor:"#E8845C",cursor:"pointer"}}/>
+              <label htmlFor="isRetouche" style={{fontSize:13,fontWeight:500,color:"#E8845C",cursor:"pointer"}}>🔧 Retouche (retour sur intervention précédente)</label>
+            </div>
           </div>
           <div className="card" style={{marginBottom:16}}>
             <div className="card-title">Client</div>
@@ -404,6 +383,10 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="card-title">Informations générales</div>
           <div className="row2"><div className="field"><label>N° Devis</label><input value={editForm.numDevis} onChange={e=>setEditForm({...editForm,numDevis:e.target.value})}/></div><div className="field"><label>Date prévue</label><input type="date" value={editForm.datePrevue} onChange={e=>setEditForm({...editForm,datePrevue:e.target.value})}/></div></div>
           <div className="row2"><div className="field"><label>Heure</label><input type="time" value={editForm.heurePrevue} onChange={e=>setEditForm({...editForm,heurePrevue:e.target.value})}/></div><div className="field"><label>Collaborateur</label><select value={editForm.techId} onChange={e=>setEditForm({...editForm,techId:e.target.value})}><option>Dimitri</option><option>Georges</option><option>Equipe</option></select></div></div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8,padding:"10px 0",borderTop:"0.5px solid var(--color-border-tertiary, #e8e5e0)"}}>
+            <input type="checkbox" id="editIsRetouche" checked={!!editForm.isRetouche} onChange={e=>setEditForm({...editForm,isRetouche:e.target.checked})} style={{width:16,height:16,accentColor:"#E8845C",cursor:"pointer"}}/>
+            <label htmlFor="editIsRetouche" style={{fontSize:13,fontWeight:500,color:"#E8845C",cursor:"pointer"}}>🔧 Retouche (retour sur intervention précédente)</label>
+          </div>
         </div>
         <div className="card" style={{marginBottom:16}}>
           <div className="card-title">Client</div>
@@ -427,7 +410,8 @@ export default function AdminDashboard({ user, onLogout }) {
           <button onClick={()=>{setView("list");setSelected(null);setConfirmDelete(false);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
-          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>)}
+          {selected.isRetouche&&<span className="ca-badge retouche">🔧 Retouche</span>}
+          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[],isRetouche:selected.isRetouche||false});setEditMode(true);}}>Modifier</button>)}
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
         <div className="card" style={{marginBottom:12}}>
@@ -459,6 +443,30 @@ export default function AdminDashboard({ user, onLogout }) {
           {selected.geoArrivee&&<div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>}
         </div>
         <div className="card" style={{marginBottom:12}}><div className="card-title">Compte rendu</div><div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div><div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div></div>
+        {selected.statut==="terminé"&&(
+          <div className="card" style={{marginBottom:12}}>
+            <div className="card-title">Facturation</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+              <div>
+                <p style={{fontSize:12,color:"#888",margin:"0 0 4px"}}>Statut actuel</p>
+                {selected.statutFacture
+                  ?<span className={`ca-badge ${scFacture(selected.statutFacture)}`} style={{fontSize:12,padding:"4px 12px"}}>{FACT_ICONS[selected.statutFacture]} {FACT_LABELS[selected.statutFacture]}</span>
+                  :<span style={{fontSize:12,color:"#aaa"}}>Non défini</span>}
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {Object.entries(FACT_LABELS).map(([k,l])=>(
+                  <button key={k} onClick={()=>updateStatutFacture(k)}
+                    style={{fontSize:11,padding:"6px 12px",borderRadius:8,border:"0.5px solid #ddd",cursor:"pointer",
+                      background:selected.statutFacture===k?"#1a1a1a":"white",
+                      color:selected.statutFacture===k?"white":"#555",
+                      fontWeight:selected.statutFacture===k?600:400}}>
+                    {FACT_ICONS[k]} {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {selected.signatureTech&&<div className="card" style={{marginBottom:12}}><div className="card-title">Signatures</div><div className="row2"><div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>{selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}</div></div>}
         {selected.statut==="en cours"&&(
           <div style={{marginBottom:16,padding:"12px 16px",background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
@@ -472,26 +480,7 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
           </div>
         )}
-        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}>
-          <button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>
-          <button
-            onClick={() => sendSingleBonToDrive(selected)}
-            disabled={driveStatus === "sending" || driveStatus === "sent" || selected.driveEnvoye}
-            style={{
-              flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-              background: selected.driveEnvoye || driveStatus==="sent" ? "#e8f5e9" : driveStatus==="error" ? "#fdecea" : "#e8f0fe",
-              color: selected.driveEnvoye || driveStatus==="sent" ? "#1a7a45" : driveStatus==="error" ? "#c0392b" : "#185FA5",
-              border: `0.5px solid ${selected.driveEnvoye || driveStatus==="sent" ? "#a5d6a7" : driveStatus==="error" ? "#f5c6cb" : "#90caf9"}`,
-              padding:"12px 16px", borderRadius:10, cursor: selected.driveEnvoye || driveStatus==="sending" || driveStatus==="sent" ? "default" : "pointer",
-              fontSize:14, fontWeight:600, opacity: driveStatus==="sending" ? 0.7 : 1,
-            }}>
-            {driveStatus==="sending" ? "⏳ Envoi…"
-              : (selected.driveEnvoye || driveStatus==="sent") ? "✅ Envoyé Drive"
-              : driveStatus==="error" ? "❌ Réessayer"
-              : "📤 Envoyer Drive"}
-          </button>
-          {selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Avis Google</button>}
-        </div>}
+        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}><button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>{selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Demander un avis Google</button>}</div>}
       </div>
     );
 
@@ -501,6 +490,14 @@ export default function AdminDashboard({ user, onLogout }) {
           <button onClick={()=>setView("dashboard")} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Tableau de bord</button>
           <h2 style={{margin:0,fontSize:16,fontWeight:600,flex:1}}>Tous les bons</h2>
           <button className="ca-btn teal" onClick={()=>setView("new")}>+ Nouveau</button>
+        </div>
+        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+          {[["a_facturer","🟡 À facturer"],["facture","🔵 Facturé"],["paye","✅ Payé"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setFilter(f=>f===k?"":k)}
+              style={{fontSize:11,padding:"5px 12px",borderRadius:20,border:"0.5px solid #ddd",cursor:"pointer",background:filter===k?"#1a1a1a":"white",color:filter===k?"white":"#555",fontWeight:filter===k?600:400}}>
+              {l} <span style={{fontWeight:700,marginLeft:4}}>{bons.filter(b=>b.statutFacture===k).length}</span>
+            </button>
+          ))}
         </div>
         {filter&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}><span style={{fontSize:12,color:"#888"}}>Filtre :</span><span style={{background:"#35B499",color:"white",fontSize:12,padding:"3px 10px",borderRadius:20}}>{filter}</span><button onClick={()=>setFilter("")} style={{background:"transparent",border:"none",color:"#888",cursor:"pointer",fontSize:12}}>✕</button></div>}
         <div style={{marginBottom:14}}><input type="text" placeholder="Rechercher par client, référence, type…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",padding:"9px 16px",fontSize:13,border:"0.5px solid #e0ddd8",borderRadius:8,background:"white",boxSizing:"border-box"}}/></div>
