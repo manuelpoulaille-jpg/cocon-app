@@ -78,14 +78,19 @@ const statutBg = (s) =>
 export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBon }) {
   const isAdmin = isAdminProp !== undefined ? isAdminProp : user?.role === "admin";
 
-  const currentMonday = getCurrentMonday();
-  const nextMonday = new Date(currentMonday);
-  nextMonday.setDate(currentMonday.getDate() + 7);
+  const [weekOffset, setWeekOffset] = useState(0);
 
-  const week1 = getWeekFrom(currentMonday);
-  const week2 = getWeekFrom(nextMonday);
+  const getMonday = (offset) => {
+    const currentMonday = getCurrentMonday();
+    const m = new Date(currentMonday);
+    m.setDate(currentMonday.getDate() + offset * 7);
+    return m;
+  };
+
+  const monday     = getMonday(weekOffset);
+  const week1      = getWeekFrom(monday);
   const rangeStart = fmtDate(week1[0]);
-  const rangeEnd   = fmtDate(week2[6]);
+  const rangeEnd   = fmtDate(week1[6]);
 
   const [bons, setBons]             = useState([]);
   const [indispos, setIndispos]     = useState([]);
@@ -101,7 +106,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [weekOffset]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -151,7 +156,9 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const handleAddButton = () => {
     const hStr = "08:00";
-    setForm({ datePrevue:fmtDate(new Date()), heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
+    const todayStr = fmtDate(new Date());
+    const defaultDate = todayStr >= rangeStart && todayStr <= rangeEnd ? todayStr : rangeStart;
+    setForm({ datePrevue:defaultDate, heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
     setFormStep(1);
   };
 
@@ -250,10 +257,6 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const tomDate   = new Date(); tomDate.setDate(todayDate.getDate() + 1);
     const todayStr  = fmtDate(todayDate);
     const tomStr    = fmtDate(tomDate);
-    const w1start   = fmtDate(week1[0]);
-    const w1end     = fmtDate(week1[6]);
-    const w2start   = fmtDate(week2[0]);
-    const w2end     = fmtDate(week2[6]);
 
     let header = "";
     let days   = [];
@@ -267,17 +270,12 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
       filteredBons = bons.filter(b => b.datePrevue === tomStr);
       days = [tomStr];
-    } else if (period === "next_week") {
-      const d1 = week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
-      const d2 = week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
-      header = `📅 *Planning semaine prochaine · ${d1} – ${d2}*`;
-      filteredBons = bons.filter(b => b.datePrevue >= w2start && b.datePrevue <= w2end);
-      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     } else {
       const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
-      header = `📅 *Planning semaine · ${d1} – ${d2}*`;
-      filteredBons = bons.filter(b => b.datePrevue >= w1start && b.datePrevue <= w1end);
+      const weekLabel = weekOffset === 0 ? "semaine en cours" : weekOffset === 1 ? "semaine prochaine" : weekOffset === -1 ? "semaine dernière" : `semaine du ${d1}`;
+      header = `📅 *Planning Cocon+ · ${weekLabel.charAt(0).toUpperCase()+weekLabel.slice(1)} · ${d1} – ${d2}*`;
+      filteredBons = bons.filter(b => b.datePrevue >= rangeStart && b.datePrevue <= rangeEnd);
       days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     }
 
@@ -293,34 +291,41 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
       if (dayBons.length === 0) return;
 
-      // En-tête jour pour la vue semaine
-      if (period === "week" || period === "next_week") {
+      if (period === "week") {
         const d = new Date(dateStr + "T12:00:00");
         const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
         lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
       }
 
       dayBons.forEach(b => {
-        const emoji  = TECH_EMOJIS[b.techNom] || "⚫";
-        const heure  = fmtHeure(b.heurePrevue);
-        const client = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
-        const ville  = extractVille(b.adresseIntervention||b.clientAdresse||"");
-        const villeStr = ville ? ` · ${ville}` : "";
-        lines.push(`${emoji} ${heure} ${client} → ${b.type}${villeStr}`);
+        const techEmoji  = TECH_EMOJIS[b.techNom] || "⚫";
+        const retouche   = b.isRetouche ? "🔧" : "";
+        const prefix     = retouche ? `${techEmoji}🔧` : techEmoji;
+        const heure      = fmtHeure(b.heurePrevue);
+        const client     = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
+        const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
+        const villeStr   = ville ? ` · ${ville}` : "";
+        lines.push(`${prefix} ${heure} ${client} → ${b.type}${villeStr}`);
       });
 
       if (period === "week") lines.push("");
     });
 
     // Résumé
-    const nbJours = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
-    const resume  = (period === "week" || period === "next_week")
+    const nbJours  = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
+    const nbRetouches = filteredBons.filter(b => b.isRetouche).length;
+    const resumeBase = (period === "week")
       ? `${filteredBons.length} intervention${filteredBons.length>1?"s":""} · ${nbJours} jour${nbJours>1?"s":""}`
       : `${filteredBons.length} intervention${filteredBons.length>1?"s":""}`;
+    const resumeRetouche = nbRetouches > 0 ? ` (dont ${nbRetouches} retouche${nbRetouches>1?"s":""})` : "";
 
     lines.push("━━━━━━━━━━━━━");
-    lines.push(resume);
+    lines.push(resumeBase + resumeRetouche);
     lines.push(`🔗 ${window.location.origin}`);
+    lines.push("");
+    lines.push("*Légende*");
+    lines.push(`${TECH_EMOJIS["Dimitri"]||"🟢"} Dimitri · ${TECH_EMOJIS["Georges"]||"🟠"} Georges · ${TECH_EMOJIS["Equipe"]||"🔵"} Equipe`);
+    lines.push("🔧 Retouche");
     lines.push("");
     lines.push("_Cocon+ · 0596 73 66 66_");
 
@@ -456,11 +461,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── PANNEAU WHATSAPP ──────────────────────────────────────────────────────
   if (waPanel) {
+    const weekLabel = weekOffset === 0 ? "Semaine en cours" : weekOffset === 1 ? "Semaine prochaine" : weekOffset === -1 ? "Semaine dernière" : `Sem. du ${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}`;
     const periods = [
-      { key:"today",     label:"Aujourd'hui",      icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
-      { key:"tomorrow",  label:"Demain",            icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
-      { key:"week",      label:"Cette semaine",     icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
-      { key:"next_week", label:"Semaine prochaine", icon:"📋", sub: `${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"today",    label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
+      { key:"tomorrow", label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
+      { key:"week",     label:weekLabel,        icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
     ];
     return (
       <div className="container">
@@ -879,6 +884,13 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   );
 
   // ── VUE PRINCIPALE ────────────────────────────────────────────────────────
+  const isCurrentWeek = weekOffset === 0;
+  const weekLabel = weekOffset === 0 ? "Semaine en cours"
+    : weekOffset === 1 ? "Semaine prochaine"
+    : weekOffset === -1 ? "Semaine dernière"
+    : weekOffset > 0 ? `Dans ${weekOffset} semaines`
+    : `Il y a ${Math.abs(weekOffset)} semaines`;
+
   return (
     <div className="container">
       <div className="page-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
@@ -898,12 +910,36 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+      {/* ── Navigation semaine ── */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:8}}>
+        <button onClick={()=>setWeekOffset(o=>o-1)}
+          style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",color:"var(--color-text-primary)",fontWeight:500}}>
+          ← Précédente
+        </button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--color-text-primary)"}}>{weekLabel}</div>
+          <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>
+            {week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} – {week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"})}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {!isCurrentWeek && (
+            <button onClick={()=>setWeekOffset(0)}
+              style={{background:"#35B499",color:"white",border:"none",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>
+              Aujourd'hui
+            </button>
+          )}
+          <button onClick={()=>setWeekOffset(o=>o+1)}
+            style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",color:"var(--color-text-primary)",fontWeight:500}}>
+            Suivante →
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:14}}>
         {[
-          {label:"Cette semaine",val:bons.filter(b=>b.datePrevue>=fmtDate(week1[0])&&b.datePrevue<=fmtDate(week1[6])).length,color:"#35B499"},
-          {label:"Semaine suivante",val:bons.filter(b=>b.datePrevue>=fmtDate(week2[0])&&b.datePrevue<=fmtDate(week2[6])).length,color:"#5C8EE8"},
-          {label:"Terminés",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499"},
-          {label:"Restants",val:bons.filter(b=>b.statut!=="terminé").length,color:"#E8845C"},
+          {label:"Interventions",val:bons.length,color:"#35B499"},
+          {label:"Terminées",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499"},
         ].map(({label,val,color})=>(
           <div key={label} style={{background:"var(--color-background-secondary)",borderRadius:10,padding:"10px",textAlign:"center"}}>
             <p style={{fontSize:20,fontWeight:800,color,lineHeight:1.1}}>{val}</p>
@@ -927,8 +963,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       </div>
 
       {loading && <p style={{textAlign:"center",color:"var(--color-text-secondary)",fontSize:13,padding:"2rem 0"}}>Chargement…</p>}
-      {!loading && <WeekGrid days={week1} label="Semaine en cours" />}
-      {!loading && <WeekGrid days={week2} label="Semaine suivante" />}
+      {!loading && <WeekGrid days={week1} label={weekLabel} />}
 
       {isAdmin && !loading && (
         <div style={{marginTop:8,paddingTop:16,borderTop:"0.5px solid var(--color-border-tertiary)"}}>
