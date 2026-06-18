@@ -965,13 +965,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
         {[
-          {label:"Interventions",val:bons.length,color:"#35B499"},
-          {label:"Terminées",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499"},
-        ].map(({label,val,color})=>(
+          {label:"Interventions",val:bons.length,color:"#35B499",fmt:v=>v},
+          {label:"Terminées",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499",fmt:v=>v},
+          {label:"CA prévisionnel",val:bons.reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0),color:"#8B6A4E",fmt:v=>v>0?v.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—"},
+        ].map(({label,val,color,fmt})=>(
           <div key={label} style={{background:"var(--color-background-secondary)",borderRadius:10,padding:"10px",textAlign:"center"}}>
-            <p style={{fontSize:20,fontWeight:800,color,lineHeight:1.1}}>{val}</p>
+            <p style={{fontSize:val>9999?15:20,fontWeight:800,color,lineHeight:1.1}}>{fmt(val)}</p>
             <p style={{fontSize:10,color:"var(--color-text-secondary)"}}>{label}</p>
           </div>
         ))}
