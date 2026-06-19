@@ -260,82 +260,105 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const todayStr  = fmtDate(todayDate);
     const tomStr    = fmtDate(tomDate);
 
+    // Génère toutes les dates entre dateDebut et dateFin incluses
+    const expandDays = (dateDebut, dateFin) => {
+      const days = [];
+      const cur = new Date(dateDebut + "T12:00:00");
+      const end = new Date((dateFin || dateDebut) + "T12:00:00");
+      while (cur <= end) {
+        days.push(fmtDate(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+      return days;
+    };
+
+    // Construit une map jour → [bons] en expandant les multi-jours
+    const buildDayMap = (bonsList, rangeStart, rangeEnd) => {
+      const map = {};
+      bonsList.forEach(b => {
+        const days = expandDays(b.datePrevue, b.dateFinPrevue || b.datePrevue);
+        days.forEach(d => {
+          if (d < rangeStart || d > rangeEnd) return;
+          if (!map[d]) map[d] = [];
+          map[d].push({ ...b, _displayDate: d });
+        });
+      });
+      return map;
+    };
+
     let header = "";
-    let days   = [];
+    let dayMap  = {};
+    let rangeS  = "";
+    let rangeE  = "";
     let filteredBons = [];
 
     if (period === "today") {
       header = `📅 *Planning Cocon+ · ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
-      filteredBons = bons.filter(b => b.datePrevue <= todayStr && (!b.dateFinPrevue || b.dateFinPrevue >= todayStr));
-      days = [todayStr];
+      filteredBons = bons;
+      rangeS = todayStr; rangeE = todayStr;
     } else if (period === "tomorrow") {
       header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
-      filteredBons = bons.filter(b => b.datePrevue <= tomStr && (!b.dateFinPrevue || b.dateFinPrevue >= tomStr));
-      days = [tomStr];
+      filteredBons = bons;
+      rangeS = tomStr; rangeE = tomStr;
     } else if (period === "next_week") {
       const nextM   = getMonday(weekOffset + 1);
       const w2      = getWeekFrom(nextM);
-      const w2start = fmtDate(w2[0]);
-      const w2end   = fmtDate(w2[6]);
+      rangeS = fmtDate(w2[0]); rangeE = fmtDate(w2[6]);
       const d1 = w2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const d2 = w2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const nwLabel = weekOffset === 0 ? "semaine prochaine" : weekOffset === -1 ? "semaine en cours" : `semaine du ${d1}`;
       header = `📅 *Planning Cocon+ · ${nwLabel.charAt(0).toUpperCase()+nwLabel.slice(1)} · ${d1} – ${d2}*`;
       filteredBons = nextWeekBons;
-      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
     } else {
+      rangeS = rangeStart; rangeE = rangeEnd;
       const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
       const weekLabel = weekOffset === 0 ? "semaine en cours" : weekOffset === 1 ? "semaine prochaine" : weekOffset === -1 ? "semaine dernière" : `semaine du ${d1}`;
       header = `📅 *Planning Cocon+ · ${weekLabel.charAt(0).toUpperCase()+weekLabel.slice(1)} · ${d1} – ${d2}*`;
-      filteredBons = bons.filter(b => b.datePrevue >= rangeStart && b.datePrevue <= rangeEnd);
-      days = [...new Set(filteredBons.map(b => b.datePrevue).filter(Boolean))].sort();
+      filteredBons = bons;
     }
 
-    if (filteredBons.length === 0) {
-      return `${header}\n\nAucune intervention prévue.`;
-    }
+    dayMap = buildDayMap(filteredBons, rangeS, rangeE);
+    const days = Object.keys(dayMap).sort();
+
+    if (days.length === 0) return `${header}\n\nAucune intervention prévue.`;
 
     const lines = [header, ""];
+    const isMultiPeriod = period === "week" || period === "next_week";
 
     days.forEach(dateStr => {
-      const dayBons = filteredBons
-        .filter(b => b.datePrevue === dateStr)
-        .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
-      if (dayBons.length === 0) return;
+      const dayBons = dayMap[dateStr].sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
 
-      if (period === "week" || period === "next_week") {
+      if (isMultiPeriod) {
         const d = new Date(dateStr + "T12:00:00");
         const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
         lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
       }
 
       dayBons.forEach(b => {
-        const techEmoji  = TECH_EMOJIS[b.techNom] || "⚫";
-        const retouche   = b.isRetouche ? "🔧" : "";
-        const prefix     = retouche ? `${techEmoji}🔧` : techEmoji;
-        const heure      = fmtHeure(b.heurePrevue);
-        const heureFin   = b.heureFinPrevue ? ` → ${fmtHeure(b.heureFinPrevue)}` : "";
-        const client     = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
-        const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
-        const villeStr   = ville ? ` · ${ville}` : "";
-        // Mention multi-jours si dateFinPrevue dépasse la date du jour affiché
-        const multiJours = b.dateFinPrevue && b.dateFinPrevue > b.datePrevue
-          ? ` _(jusqu'au ${new Date(b.dateFinPrevue+"T12:00:00").toLocaleDateString("fr-FR",{day:"numeric",month:"short"})})_`
-          : "";
-        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}${multiJours}`);
+        const techEmoji = TECH_EMOJIS[b.techNom] || "⚫";
+        const prefix    = b.isRetouche ? `${techEmoji}🔧` : techEmoji;
+        const estPremierJour = b._displayDate === b.datePrevue;
+        const heure     = estPremierJour ? fmtHeure(b.heurePrevue) : "↪";
+        const heureFin  = estPremierJour && b.heureFinPrevue ? ` → ${fmtHeure(b.heureFinPrevue)}` : "";
+        const client    = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
+        const ville     = extractVille(b.adresseIntervention||b.clientAdresse||"");
+        const villeStr  = ville ? ` · ${ville}` : "";
+        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}`);
       });
 
-      if (period === "week" || period === "next_week") lines.push("");
+      if (isMultiPeriod) lines.push("");
     });
 
-    // Résumé
-    const nbJours  = days.filter(d => filteredBons.some(b => b.datePrevue === d)).length;
-    const nbRetouches = filteredBons.filter(b => b.isRetouche).length;
-    const isMultiDay = period === "week" || period === "next_week";
-    const resumeBase = isMultiDay
-      ? `${filteredBons.length} intervention${filteredBons.length>1?"s":""} · ${nbJours} jour${nbJours>1?"s":""}`
-      : `${filteredBons.length} intervention${filteredBons.length>1?"s":""}`;
+    // Résumé — compter les bons uniques (pas les jours expanded)
+    const uniqueBons = [...new Map(filteredBons.filter(b => {
+      const bdays = expandDays(b.datePrevue, b.dateFinPrevue || b.datePrevue);
+      return bdays.some(d => d >= rangeS && d <= rangeE);
+    }).map(b => [b.id, b])).values()];
+    const nbRetouches = uniqueBons.filter(b => b.isRetouche).length;
+    const resumeBase = isMultiPeriod
+      ? `${uniqueBons.length} intervention${uniqueBons.length>1?"s":""} · ${days.length} jour${days.length>1?"s":""}`
+      : `${uniqueBons.length} intervention${uniqueBons.length>1?"s":""}`;
     const resumeRetouche = nbRetouches > 0 ? ` (dont ${nbRetouches} retouche${nbRetouches>1?"s":""})` : "";
 
     lines.push("━━━━━━━━━━━━━");
