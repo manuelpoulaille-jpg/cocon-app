@@ -104,6 +104,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [waPanel,  setWaPanel]  = useState(false);
   const [waMessage, setWaMessage] = useState("");
   const [waNextWeekBons, setWaNextWeekBons] = useState([]);
+  const [waCopied, setWaCopied] = useState(false);
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
@@ -265,11 +266,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
     if (period === "today") {
       header = `📅 *Planning Cocon+ · ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
-      filteredBons = bons.filter(b => b.datePrevue === todayStr);
+      filteredBons = bons.filter(b => b.datePrevue <= todayStr && (!b.dateFinPrevue || b.dateFinPrevue >= todayStr));
       days = [todayStr];
     } else if (period === "tomorrow") {
       header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
-      filteredBons = bons.filter(b => b.datePrevue === tomStr);
+      filteredBons = bons.filter(b => b.datePrevue <= tomStr && (!b.dateFinPrevue || b.dateFinPrevue >= tomStr));
       days = [tomStr];
     } else if (period === "next_week") {
       const nextM   = getMonday(weekOffset + 1);
@@ -314,10 +315,15 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         const retouche   = b.isRetouche ? "🔧" : "";
         const prefix     = retouche ? `${techEmoji}🔧` : techEmoji;
         const heure      = fmtHeure(b.heurePrevue);
+        const heureFin   = b.heureFinPrevue ? ` → ${fmtHeure(b.heureFinPrevue)}` : "";
         const client     = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
         const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
         const villeStr   = ville ? ` · ${ville}` : "";
-        lines.push(`${prefix} ${heure} ${client} → ${b.type}${villeStr}`);
+        // Mention multi-jours si dateFinPrevue dépasse la date du jour affiché
+        const multiJours = b.dateFinPrevue && b.dateFinPrevue > b.datePrevue
+          ? ` _(jusqu'au ${new Date(b.dateFinPrevue+"T12:00:00").toLocaleDateString("fr-FR",{day:"numeric",month:"short"})})_`
+          : "";
+        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}${multiJours}`);
       });
 
       if (period === "week" || period === "next_week") lines.push("");
@@ -362,8 +368,23 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setWaMessage(msg);
   };
 
-  const openWhatsApp = () => {
-    window.open(`https://wa.me/?text=${encodeURIComponent(waMessage)}`, "_blank");
+  const openWhatsApp = async () => {
+    try {
+      await navigator.clipboard.writeText(waMessage);
+      setWaCopied(true);
+      setTimeout(() => setWaCopied(false), 4000);
+    } catch(e) {
+      // Fallback si clipboard non dispo
+      const ta = document.createElement("textarea");
+      ta.value = waMessage;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setWaCopied(true);
+      setTimeout(() => setWaCopied(false), 4000);
+    }
+    window.open("https://web.whatsapp.com", "_blank");
   };
 
   const selectStyle = {
@@ -533,8 +554,17 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             </div>
             <button onClick={openWhatsApp}
               style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
-              💬 Ouvrir WhatsApp
+              💬 Copier &amp; Ouvrir WhatsApp
             </button>
+            {waCopied && (
+              <div style={{background:"#e8f5f3",border:"0.5px solid #35B499",borderRadius:10,padding:"12px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>✅</span>
+                <div>
+                  <p style={{fontSize:13,fontWeight:600,color:"#1a7a65",margin:0}}>Message copié !</p>
+                  <p style={{fontSize:12,color:"#35B499",margin:"2px 0 0"}}>Collez-le dans WhatsApp avec <b>Ctrl+V</b> (ou ⌘+V sur Mac)</p>
+                </div>
+              </div>
+            )}
             <button className="btn-outline" style={{width:"100%"}} onClick={() => setWaMessage("")}>
               ← Choisir une autre période
             </button>
