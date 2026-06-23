@@ -139,7 +139,7 @@ export default function AdminDashboard({ user, onLogout }) {
   },[]);
   useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
 
-  const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
+  const fetchBons=async()=>{const snap=await getDocs(collection(db,"bons"));const all=snap.docs.map(d=>({id:d.id,...d.data()}));all.sort((a,b)=>{const d=(b.datePrevue||"").localeCompare(a.datePrevue||"");if(d!==0)return d;return(b.heurePrevue||"").localeCompare(a.heurePrevue||"");});setBons(all);};
   const fetchTachesHome = async () => {
     try {
       const snap = await getDocs(collection(db, "taches"));
@@ -267,7 +267,8 @@ export default function AdminDashboard({ user, onLogout }) {
     const prenom=bon.clientPrenom||bon.clientNom||"client";
     const raw=(bon.clientTel||"").replace(/\s/g,"");
     const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
+    const url=`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`;
+    const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noreferrer";document.body.appendChild(a);a.click();document.body.removeChild(a);
   };
 
   const fmtDateFr=(str)=>{
@@ -282,7 +283,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
     const techPhrase=(!bon.techNom||bon.techNom==="Equipe")?"Notre équipe sera sur place à l'heure prévue.":`Notre technicien ${bon.techNom} sera sur place à l'heure prévue.`;
     const msg=`Bonjour ${prenom} 👋\n\nNous confirmons votre rendez-vous avec Cocon+ :\n\n📅 Le ${fmtDateFr(bon.datePrevue)} à ${bon.heurePrevue||"—"}\n🔧 Intervention : ${bon.type||"—"}\n📍 ${adresse}\n\n${techPhrase} En cas d'empêchement, contactez-nous au 0596 73 66 66.\n\nÀ très bientôt ! 🌿\nL'équipe Cocon+`;
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+    const a=document.createElement("a");a.href=`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`;a.target="_blank";a.rel="noreferrer";document.body.appendChild(a);a.click();document.body.removeChild(a);
   };
 
   const envoyerRappelWA=(bon)=>{
@@ -291,7 +292,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
     const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
     const msg=`Bonjour ${prenom} 👋\n\nRappel : votre intervention Cocon+ a lieu dans 2 jours !\n\n📅 ${fmtDateFr(bon.datePrevue)} à ${bon.heurePrevue||"—"}\n🔧 ${bon.type||"—"}\n📍 ${adresse}\n\nPensez à prévoir l'accès au logement 🏠\nUn changement ? Appelez-nous : 0596 73 66 66\n\nÀ bientôt ! 🌿\nL'équipe Cocon+`;
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+    const a2=document.createElement("a");a2.href=`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`;a2.target="_blank";a2.rel="noreferrer";document.body.appendChild(a2);a2.click();document.body.removeChild(a2);
   };
 
   const stats={
