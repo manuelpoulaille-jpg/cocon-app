@@ -139,7 +139,7 @@ export default function AdminDashboard({ user, onLogout }) {
   },[]);
   useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
 
-  const fetchBons=async()=>{const snap=await getDocs(collection(db,"bons"));const all=snap.docs.map(d=>({id:d.id,...d.data()}));all.sort((a,b)=>{const dc=(b.datePrevue||"").localeCompare(a.datePrevue||"");if(dc!==0)return dc;return(b.heurePrevue||"").localeCompare(a.heurePrevue||"");});setBons(all);};
+  const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
     try {
       const snap = await getDocs(collection(db, "taches"));
@@ -270,6 +270,30 @@ export default function AdminDashboard({ user, onLogout }) {
     window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
   };
 
+  const fmtDateFr=(str)=>{
+    if(!str) return "—";
+    return new Date(str+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
+  };
+
+  const envoyerConfirmationWA=(bon)=>{
+    const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const raw=(bon.clientTel||"").replace(/\s/g,"");
+    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
+    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
+    const techPhrase=(!bon.techNom||bon.techNom==="Equipe")?"Notre équipe sera sur place à l'heure prévue.":`Notre technicien ${bon.techNom} sera sur place à l'heure prévue.`;
+    const msg=`Bonjour ${prenom} 👋\n\nNous confirmons votre rendez-vous avec Cocon+ :\n\n📅 Le ${fmtDateFr(bon.datePrevue)} à ${bon.heurePrevue||"—"}\n🔧 Intervention : ${bon.type||"—"}\n📍 ${adresse}\n\n${techPhrase} En cas d'empêchement, contactez-nous au 0596 73 66 66.\n\nÀ très bientôt ! 🌿\nL'équipe Cocon+`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+  };
+
+  const envoyerRappelWA=(bon)=>{
+    const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const raw=(bon.clientTel||"").replace(/\s/g,"");
+    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
+    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
+    const msg=`Bonjour ${prenom} 👋\n\nRappel : votre intervention Cocon+ a lieu dans 2 jours !\n\n📅 ${fmtDateFr(bon.datePrevue)} à ${bon.heurePrevue||"—"}\n🔧 ${bon.type||"—"}\n📍 ${adresse}\n\nPensez à prévoir l'accès au logement 🏠\nUn changement ? Appelez-nous : 0596 73 66 66\n\nÀ bientôt ! 🌿\nL'équipe Cocon+`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+  };
+
   const stats={
     planifie:bons.filter(b=>b.statut==="planifié").length,
     enCours:bons.filter(b=>b.statut==="en cours").length,
@@ -390,27 +414,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="card-title">Informations générales</div>
           {selected.numDevis&&<div className="info-row"><span>N° Devis</span><b>{selected.numDevis}</b></div>}
           {selected.numVisite&&<div className="info-row"><span>N° Visite</span><b style={{color:"#2a9d8f"}}>{selected.numVisite}</b></div>}
-          <div className="info-row" style={{alignItems:"center"}}>
-            <span>Montant facturé</span>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <input
-                type="number" step="0.01" min="0"
-                defaultValue={selected.montantFacture||""}
-                key={selected.id}
-                onBlur={async e=>{
-                  const val=e.target.value?parseFloat(e.target.value):null;
-                  if(val===selected.montantFacture) return;
-                  await updateDoc(doc(db,"bons",selected.id),{montantFacture:val});
-                  const updated={...selected,montantFacture:val};
-                  setSelected(updated);
-                  setBons(prev=>prev.map(b=>b.id===selected.id?{...b,montantFacture:val}:b));
-                  flashMsg("✅ Montant mis à jour.");
-                }}
-                style={{width:110,padding:"5px 8px",fontSize:13,fontWeight:600,color:"#35B499",border:"0.5px solid #b2ddd5",borderRadius:8,background:"#f0faf8",textAlign:"right"}}
-              />
-              <span style={{fontSize:13,color:"#35B499",fontWeight:600}}>€</span>
-            </div>
-          </div>
+          {selected.montantFacture&&<div className="info-row"><span>Montant facturé</span><b style={{color:"#35B499"}}>{parseFloat(selected.montantFacture).toFixed(2)} €</b></div>}
           <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
           <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
@@ -436,6 +440,21 @@ export default function AdminDashboard({ user, onLogout }) {
         </div>
         <div className="card" style={{marginBottom:12}}><div className="card-title">Compte rendu</div><div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div><div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div></div>
         {selected.signatureTech&&<div className="card" style={{marginBottom:12}}><div className="card-title">Signatures</div><div className="row2"><div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>{selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}</div></div>}
+        {selected.clientTel&&(selected.statut==="planifié"||selected.statut==="en cours")&&(
+          <div style={{marginBottom:16,padding:"12px 16px",background:"#e8f5f3",border:"0.5px solid #a0dece",borderRadius:10}}>
+            <p style={{fontSize:12,fontWeight:600,color:"#1a7a65",margin:"0 0 10px"}}>📱 Messages WhatsApp client</p>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>envoyerConfirmationWA(selected)}
+                style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#25D366",color:"white",border:"none",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}>
+                ✅ Confirmation RDV
+              </button>
+              <button onClick={()=>envoyerRappelWA(selected)}
+                style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#128C7E",color:"white",border:"none",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}>
+                🔔 Rappel J-2
+              </button>
+            </div>
+          </div>
+        )}
         {selected.statut==="en cours"&&(
           <div style={{marginBottom:16,padding:"12px 16px",background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div>
