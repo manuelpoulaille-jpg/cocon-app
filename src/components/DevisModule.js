@@ -247,20 +247,73 @@ export default function DevisModule({ onPlanifier }) {
         )}
       </div>
 
-      {/* Champ N° devis MediaBat — éditable si validé */}
+      {/* Champs complets — éditables sur validé pour préparer la planification */}
       {selected.statut === "validé" && (
         <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:12 }}>
-          <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:6 }}>N° devis MediaBat</label>
-          <input
-            value={selected.numDevis || ""}
-            onChange={async e => {
-              const val = e.target.value;
-              setSelected(s => ({ ...s, numDevis:val }));
-              await updateDoc(doc(db, "devis", selected.id), { numDevis:val });
-            }}
-            placeholder="Référence du devis MediaBat"
-            style={fieldStyle}
-          />
+          <p style={{ fontSize:10, fontWeight:600, color:"#8B6A4E", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>
+            Compléter pour la planification
+          </p>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            {[
+              ["clientEmail",         "Email",                 "email"  ],
+              ["clientPrenom",        "Prénom",                "text"   ],
+              ["numDevis",            "N° devis MediaBat",     "text"   ],
+              ["montant",             "Montant TTC (€)",       "number" ],
+            ].map(([key, label, type]) => (
+              <div key={key}>
+                <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>{label}</label>
+                <input type={type}
+                  value={selected[key] || ""}
+                  onChange={async e => {
+                    const val = e.target.value;
+                    setSelected(s => ({ ...s, [key]:val }));
+                    await updateDoc(doc(db, "devis", selected.id), { [key]:val });
+                  }}
+                  style={{ ...fieldStyle, fontSize:12, padding:"7px 10px" }}
+                />
+              </div>
+            ))}
+            <div style={{ gridColumn:"span 2" }}>
+              <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Adresse facturation</label>
+              <input
+                value={selected.adresseFacturation || ""}
+                onChange={async e => {
+                  const val = e.target.value;
+                  setSelected(s => ({ ...s, adresseFacturation:val }));
+                  await updateDoc(doc(db, "devis", selected.id), { adresseFacturation:val });
+                }}
+                style={{ ...fieldStyle, fontSize:12, padding:"7px 10px" }}
+              />
+            </div>
+            <div style={{ gridColumn:"span 2" }}>
+              <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Adresse intervention</label>
+              <input
+                value={selected.adresseIntervention || ""}
+                onChange={async e => {
+                  const val = e.target.value;
+                  setSelected(s => ({ ...s, adresseIntervention:val }));
+                  await updateDoc(doc(db, "devis", selected.id), { adresseIntervention:val });
+                }}
+                style={{ ...fieldStyle, fontSize:12, padding:"7px 10px" }}
+              />
+            </div>
+            <div style={{ gridColumn:"span 2" }}>
+              <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Demande client / contexte</label>
+              <textarea
+                value={selected.notes || ""}
+                onChange={async e => {
+                  const val = e.target.value;
+                  setSelected(s => ({ ...s, notes:val }));
+                  await updateDoc(doc(db, "devis", selected.id), { notes:val });
+                }}
+                rows={2}
+                style={{ ...fieldStyle, fontSize:12, padding:"7px 10px", resize:"vertical" }}
+              />
+            </div>
+          </div>
+          <p style={{ fontSize:10, color:"#aaa", margin:"10px 0 0", fontStyle:"italic" }}>
+            Les champs se sauvegardent automatiquement et pré-rempliront le bon d'intervention.
+          </p>
         </div>
       )}
 

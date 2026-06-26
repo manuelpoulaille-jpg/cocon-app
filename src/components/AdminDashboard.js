@@ -413,16 +413,17 @@ export default function AdminDashboard({ user, onLogout }) {
         <DevisModule onPlanifier={(d)=>{
           setForm({
             ...EMPTY_FORM,
-            clientNom:          d.clientNom||"",
-            clientPrenom:       d.clientPrenom||"",
-            clientSociete:      d.clientSociete||"",
-            clientTel:          d.clientTel||"",
-            clientEmail:        d.clientEmail||"",
-            numDevis:           d.numDevis||"",
-            types:              d.type?[d.type]:[],
-            montantFacture:     d.montant||"",
-            adresseIntervention:d.adresseIntervention||"",
-            demandeClient:      d.notes||"",
+            clientNom:           d.clientNom||"",
+            clientPrenom:        d.clientPrenom||"",
+            clientSociete:       d.clientSociete||"",
+            clientTel:           d.clientTel||"",
+            clientEmail:         d.clientEmail||"",
+            numDevis:            d.numDevis||"",
+            types:               d.type?[d.type]:[],
+            montantFacture:      d.montant||"",
+            adresseFacturation:  d.adresseFacturation||"",
+            adresseIntervention: d.adresseIntervention||"",
+            demandeClient:       d.notes||"",
           });
           navigate("new");
         }}/>
