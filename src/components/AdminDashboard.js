@@ -9,8 +9,6 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
-import FacturationModule from "./FacturationModule";
-import DevisModule from "./DevisModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -22,15 +20,6 @@ const EMPTY_FORM = {
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
 };
-
-/* ── Helpers facturation ──────────────────────────────────────────────────── */
-const SF_STYLES = {
-  "à facturer":      { bg:"#fff8f0", color:"#8B6A4E", border:"0.5px solid #e8c9b8" },
-  "facture envoyée": { bg:"#eef1ff", color:"#3a5ab0", border:"0.5px solid #aabae8" },
-  "payé":            { bg:"#e1f5ee", color:"#0e6b50", border:"0.5px solid #a0dece" },
-};
-const sfStyle = (s) => SF_STYLES[s] || { bg:"#eee", color:"#333", border:"none" };
-
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -75,7 +64,7 @@ const SCOPED_CSS = `
 .ca-panel-title{font-size:12px!important;font-weight:600!important;color:#1a1a1a!important;margin:0!important}
 .ca-panel-count{font-size:11px!important;color:#888!important;margin-left:auto!important}
 .ca-table-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
-.ca-table{width:100%!important;border-collapse:collapse!important;font-size:12px!important;min-width:640px!important}
+.ca-table{width:100%!important;border-collapse:collapse!important;font-size:12px!important;min-width:600px!important}
 .ca-table th{text-align:left!important;font-size:9.5px!important;font-weight:500!important;color:#888!important;text-transform:uppercase!important;letter-spacing:0.8px!important;padding:8px 12px!important;border-bottom:0.5px solid #e8e5e0!important;white-space:nowrap!important;background:white!important}
 .ca-table td{padding:9px 12px!important;border-bottom:0.5px solid #f0ede8!important;color:#1a1a1a!important;vertical-align:middle!important}
 .ca-table tr:last-child td{border-bottom:none!important}
@@ -92,6 +81,7 @@ const SCOPED_CSS = `
 .ca-form-zone{padding:16px!important;overflow-y:auto!important;flex:1!important}
 .ca-drive-progress{margin-bottom:16px!important;padding:12px 16px!important;background:#e8f5f3!important;border-radius:10px!important;border:1px solid #2a9d8f!important}
 
+/* ── RESPONSIVE TABLETTE (≤900px) ── */
 @media (max-width:900px){
   .ca-sidebar{position:fixed!important;left:0!important;top:0!important;bottom:0!important;transform:translateX(-100%)!important;z-index:200!important}
   .ca-sidebar.open{transform:translateX(0)!important}
@@ -105,6 +95,7 @@ const SCOPED_CSS = `
   .ca-form-zone{padding:12px!important}
 }
 
+/* ── RESPONSIVE MOBILE (≤600px) ── */
 @media (max-width:600px){
   .ca-content{padding:10px!important}
   .ca-kpi-row{grid-template-columns:repeat(2,1fr)!important}
@@ -123,77 +114,50 @@ const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();cons
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
 
 export default function AdminDashboard({ user, onLogout }) {
-  const [bons,          setBons]          = useState([]);
-  const [view,          setView]          = useState("dashboard");
-  const [selected,      setSelected]      = useState(null);
-  const [search,        setSearch]        = useState("");
-  const [filter,        setFilter]        = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [editMode,      setEditMode]      = useState(false);
-  const [editForm,      setEditForm]      = useState({});
-  const [saving,        setSaving]        = useState(false);
-  const [msg,           setMsg]           = useState("");
-  const [driveProgress, setDriveProgress] = useState(null);
-  const [driveSending,  setDriveSending]  = useState(false);
-  const [period,        setPeriod]        = useState("jour");
-  const [form,          setForm]          = useState({...EMPTY_FORM});
-  const [taches,        setTaches]        = useState([]);
-  const [contrats,      setContrats]      = useState([]);
-  const [devis,         setDevis]         = useState([]);
-  const [sidebarOpen,   setSidebarOpen]   = useState(false);
-  const [editNumFacture,setEditNumFacture]= useState("");   // ← NOUVEAU
-
+  const [bons,setBons]=useState([]);
+  const [view,setView]=useState("dashboard");
+  const [selected,setSelected]=useState(null);
+  const [search,setSearch]=useState("");
+  const [filter,setFilter]=useState("");
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const [editMode,setEditMode]=useState(false);
+  const [editForm,setEditForm]=useState({});
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [driveProgress,setDriveProgress]=useState(null);
+  const [driveSending,setDriveSending]=useState(false);
+  const [period,setPeriod]=useState("jour");
+  const [form,setForm]=useState({...EMPTY_FORM});
+  const [taches,setTaches]=useState([]);
+  const [contrats,setContrats]=useState([]);
+  const [sidebarOpen,setSidebarOpen]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
     const id="ca-scoped-styles";
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
-  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();fetchDevisHome();},[]);
-
-  /* ── Fetch ──────────────────────────────────────────────────────────────── */
+  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
-  const fetchTachesHome=async()=>{try{const snap=await getDocs(collection(db,"taches"));setTaches(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
-  const fetchContratsHome=async()=>{try{const snap=await getDocs(collection(db,"contrats"));setContrats(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
-  const fetchDevisHome=async()=>{try{const snap=await getDocs(collection(db,"devis"));setDevis(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
+  const fetchTachesHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "taches"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setTaches(all);
+    } catch(e) {}
+  };
 
-  /* ── Helpers ────────────────────────────────────────────────────────────── */
+  const fetchContratsHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "contrats"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setContrats(all);
+    } catch(e) {}
+  };
 
   const refNum=()=>"INT-"+Date.now().toString().slice(-6);
   const flashMsg=(t)=>{setMsg(t);setTimeout(()=>setMsg(""),4000);};
-
-  /** Sélectionne un bon et initialise l'état d'édition du N° facture */
-  const selectBon=(b)=>{
-    setSelected(b);
-    setEditNumFacture(b.numFacture||"");
-    setView("detail");
-  };
-
-  /* ── Facturation ────────────────────────────────────────────────────────── */
-
-  const updateFacturation=async(newStatut)=>{
-    setSaving(true);
-    const extra={};
-    if(newStatut==="facture envoyée") extra.dateFacture  =new Date().toLocaleDateString("fr-CA");
-    if(newStatut==="payé")            extra.datePaiement =new Date().toLocaleDateString("fr-CA");
-    await updateDoc(doc(db,"bons",selected.id),{
-      statutFacture:newStatut, numFacture:editNumFacture, ...extra,
-    });
-    setSelected(s=>({...s,statutFacture:newStatut,numFacture:editNumFacture,...extra}));
-    await fetchBons();
-    setSaving(false);
-  };
-
-  const saveNumFacture=async()=>{
-    setSaving(true);
-    await updateDoc(doc(db,"bons",selected.id),{numFacture:editNumFacture});
-    setSelected(s=>({...s,numFacture:editNumFacture}));
-    await fetchBons();
-    setSaving(false);
-  };
-
-  /* ── CRUD bons ──────────────────────────────────────────────────────────── */
 
   const createBon=async(e)=>{
     e.preventDefault();if(!form.types.length){alert("Sélectionnez au moins un type");return;}
@@ -213,7 +177,6 @@ export default function AdminDashboard({ user, onLogout }) {
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
         numVisite:form.numVisite||"1",
-        statutFacture:null, numFacture:"", dateFacture:"", datePaiement:"",
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
@@ -229,13 +192,13 @@ export default function AdminDashboard({ user, onLogout }) {
     await updateDoc(doc(db,"bons",selected.id),{
       heureFin:now,
       statut:"terminé",
-      statutFacture:"à facturer",   // ← initialise la facturation automatiquement
+      // Pas d'email - terminé par admin
     });
-    const updated={...selected,heureFin:now,statut:"terminé",statutFacture:"à facturer"};
+    const updated={...selected,heureFin:now,statut:"terminé"};
     setSelected(updated);
     await fetchBons();
     setSaving(false);
-    flashMsg("✅ Bon terminé. Statut facturation : À facturer.");
+    flashMsg("✅ Bon terminé par l'admin.");
   };
 
   const saveEdit=async()=>{
@@ -252,8 +215,6 @@ export default function AdminDashboard({ user, onLogout }) {
     setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", ")});
     setEditMode(false);fetchBons();setSaving(false);
   };
-
-  /* ── Drive / PDF ────────────────────────────────────────────────────────── */
 
   const sendBonsToDrive=async()=>{
     const aEnvoyer=bons.filter(b=>b.statut==="terminé"&&!b.driveEnvoye);
@@ -292,8 +253,6 @@ export default function AdminDashboard({ user, onLogout }) {
     sec("INTERVENTION");row("Type",bon.type);row("Prévu le",bon.datePrevue+" à "+bon.heurePrevue);
     row("Arrivée réelle",fmt(bon.heureArrivee));row("Fin intervention",fmt(bon.heureFin));row("Durée",calcDuree(bon.heureArrivee,bon.heureFin));
     if(bon.geoArrivee)row("Position arrivée",`Lat:${bon.geoArrivee.lat?.toFixed(5)},Lng:${bon.geoArrivee.lng?.toFixed(5)}`);y+=2;
-    if(bon.montantFacture)row("Montant facturé",parseFloat(bon.montantFacture).toFixed(2)+" €");
-    if(bon.numFacture)row("N° Facture",bon.numFacture);y+=2;
     sec("COMPTE RENDU");const oC=p.splitTextToSize("Cocon+ : "+(bon.obsCocon||"—"),175);p.text(oC,ml,y);y+=oC.length*5+3;
     const oCl=p.splitTextToSize("Client : "+(bon.obsClient||"—"),175);p.text(oCl,ml,y);y+=oCl.length*5+5;
     sec("SIGNATURES");p.setFontSize(9);p.text("Collaborateur",ml,y);p.text("Client",ml+90,y);y+=3;
@@ -304,6 +263,26 @@ export default function AdminDashboard({ user, onLogout }) {
     if(autoSave)p.save(nom);return p.output("datauristring");
   };
 
+  const fmtDateLong=(str)=>{if(!str)return"—";const d=new Date(str+"T12:00:00");return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});};
+
+  const envoyerConfirmation=(bon)=>{
+    const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const raw=(bon.clientTel||"").replace(/\s/g,"");
+    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")||raw.startsWith("0694")?"596"+raw.slice(1):"596"+raw.slice(1);
+    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
+    const msg=`Bonjour ${prenom} 👋\n\nNous confirmons votre rendez-vous avec Cocon+ :\n\n📅 Le ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue}\n🔧 Intervention : ${bon.type}\n📍 ${adresse}\n\nNotre technicien ${bon.techNom} sera sur place à l'heure prévue. En cas d'empêchement, contactez-nous au 0596 73 66 66.\n\nÀ très bientôt ! 🌿\nL'équipe Cocon+`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+  };
+
+  const envoyerRappel=(bon)=>{
+    const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const raw=(bon.clientTel||"").replace(/\s/g,"");
+    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")||raw.startsWith("0694")?"596"+raw.slice(1):"596"+raw.slice(1);
+    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
+    const msg=`Bonjour ${prenom} 👋\n\nRappel : votre intervention Cocon+ a lieu dans 2 jours !\n\n📅 ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue}\n🔧 ${bon.type}\n📍 ${adresse}\n\nPensez à prévoir l'accès au logement 🏠\nUn changement ? Appelez-nous : 0596 73 66 66\n\nÀ bientôt ! 🌿\nL'équipe Cocon+`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
+  };
+
   const demanderAvis=(bon)=>{
     const prenom=bon.clientPrenom||bon.clientNom||"client";
     const raw=(bon.clientTel||"").replace(/\s/g,"");
@@ -311,13 +290,12 @@ export default function AdminDashboard({ user, onLogout }) {
     window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
   };
 
-  /* ── Stats ──────────────────────────────────────────────────────────────── */
-
   const stats={
     planifie:bons.filter(b=>b.statut==="planifié").length,
     enCours:bons.filter(b=>b.statut==="en cours").length,
     termine:bons.filter(b=>b.statut==="terminé").length,
     aujourdhui:bons.filter(b=>b.datePrevue===today).length,
+    semaine:bons.filter(b=>{const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);return new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e;}).length,
   };
 
   const filteredBons=bons.filter(b=>{
@@ -328,109 +306,41 @@ export default function AdminDashboard({ user, onLogout }) {
     return ms&&mf;
   });
 
-  /* ── BonsTable ──────────────────────────────────────────────────────────── */
-
   const BonsTable=({data,showDate=false})=>(
     <div className="ca-table-wrap">
       <table className="ca-table">
-        <thead>
-          <tr>
-            <th>Réf.</th>
-            {showDate&&<th>Date</th>}
-            <th>Client</th>
-            <th>Type</th>
-            <th>Heure</th>
-            <th>Collaborateur</th>
-            <th>Montant</th>
-            <th>Facturation</th>
-            <th>Statut</th>
-            <th></th>
-          </tr>
-        </thead>
+        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
         <tbody>
-          {data.map(b=>{
-            const sf=b.statutFacture||"à facturer";
-            const st=sfStyle(sf);
-            return(
-              <tr key={b.id} onClick={()=>selectBon(b)}>
-                <td><span className="ca-ref">{b.ref}</span></td>
-                {showDate&&<td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{fmtDate(b.datePrevue)}</td>}
-                <td>
-                  {b.clientSociete&&<span style={{display:"block",fontSize:10,color:"#35B499",fontWeight:600}}>{b.clientSociete}</span>}
-                  <span style={{fontWeight:500}}>{b.clientNom} {b.clientPrenom}</span>
-                  <span style={{display:"block",fontSize:10,color:"#888"}}>{b.clientTel}</span>
-                </td>
-                <td style={{fontSize:11,color:"#555"}}>{b.type}</td>
-                <td style={{fontSize:12,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
-                <td style={{fontSize:12}}>{b.techNom}</td>
-                <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>
-                  {b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}
-                </td>
-                <td>
-                  {b.statut==="terminé"&&(
-                    <span style={{
-                      fontSize:10,fontWeight:500,padding:"2px 8px",borderRadius:20,
-                      background:st.bg,color:st.color,border:st.border,
-                      whiteSpace:"nowrap",display:"inline-block",
-                    }}>
-                      {sf==="à facturer"?"à fact.":sf==="facture envoyée"?"envoyée":"payé"}
-                    </span>
-                  )}
-                </td>
-                <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
-                <td onClick={ev=>ev.stopPropagation()} style={{whiteSpace:"nowrap"}}>
-                  {b.statut==="terminé"&&(
-                    <>
-                      <button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>
-                      {b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}
-                    </>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+          {data.map(b=>(
+            <tr key={b.id} onClick={()=>{setSelected(b);setView("detail");}}>
+              <td><span className="ca-ref">{b.ref}</span></td>
+              {showDate&&<td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{fmtDate(b.datePrevue)}</td>}
+              <td>{b.clientSociete&&<span style={{display:"block",fontSize:10,color:"#35B499",fontWeight:600}}>{b.clientSociete}</span>}<span style={{fontWeight:500}}>{b.clientNom} {b.clientPrenom}</span><span style={{display:"block",fontSize:10,color:"#888"}}>{b.clientTel}</span></td>
+              <td style={{fontSize:11,color:"#555"}}>{b.type}</td>
+              <td style={{fontSize:12,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
+              <td style={{fontSize:12}}>{b.techNom}</td>
+              <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
+              <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
+              <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
+                {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
   );
 
   const isInterventionView=["list","new","detail"].includes(view);
-  const navigate=(v)=>{setView(v);setSidebarOpen(false);};
 
-  /* ── renderContent ──────────────────────────────────────────────────────── */
+  const navigate=(v)=>{ setView(v); setSidebarOpen(false); };
 
   const renderContent=()=>{
+    if(view==="contrats") return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
+    if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
+    if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
+    if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
 
-    if(view==="contrats")     return <div style={{flex:1,overflow:"auto"}}><ContratModule/></div>;
-    if(view==="carburant")    return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
-    if(view==="facturation")  return <div style={{flex:1,overflow:"auto"}}><FacturationModule/></div>;
-    if(view==="planning")     return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
-    if(view==="taches")       return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
-
-    /* ── Module Devis ── */
-    if(view==="devis") return(
-      <div style={{flex:1,overflow:"auto"}}>
-        <DevisModule onPlanifier={(d)=>{
-          setForm({
-            ...EMPTY_FORM,
-            clientNom:           d.clientNom||"",
-            clientPrenom:        d.clientPrenom||"",
-            clientSociete:       d.clientSociete||"",
-            clientTel:           d.clientTel||"",
-            clientEmail:         d.clientEmail||"",
-            numDevis:            d.numDevis||"",
-            types:               d.type?[d.type]:[],
-            montantFacture:      d.montant||"",
-            adresseFacturation:  d.adresseFacturation||"",
-            adresseIntervention: d.adresseIntervention||"",
-            demandeClient:       d.notes||"",
-          });
-          navigate("new");
-        }}/>
-      </div>
-    );
-
-    /* ── Nouveau bon ── */
     if(view==="new") return(
       <div className="ca-form-zone">
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
@@ -463,7 +373,6 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
     );
 
-    /* ── Détail – mode édition ── */
     if(view==="detail"&&selected&&editMode) return(
       <div className="ca-form-zone">
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}><button onClick={()=>setEditMode(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Annuler</button><h2 style={{margin:0,fontSize:16,fontWeight:600}}>Modifier — {selected.ref}</h2></div>
@@ -487,29 +396,16 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
     );
 
-    /* ── Détail ── */
     if(view==="detail"&&selected) return(
       <div className="ca-form-zone">
-        {confirmDelete&&(
-          <div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-            <span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la suppression ?</span>
-            <div style={{display:"flex",gap:8}}>
-              <button className="btn-outline" onClick={()=>setConfirmDelete(false)}>Annuler</button>
-              <button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteBon}>Supprimer</button>
-            </div>
-          </div>
-        )}
+        {confirmDelete&&(<div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la suppression ?</span><div style={{display:"flex",gap:8}}><button className="btn-outline" onClick={()=>setConfirmDelete(false)}>Annuler</button><button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteBon}>Supprimer</button></div></div>)}
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
           <button onClick={()=>{setView("list");setSelected(null);setConfirmDelete(false);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
-          {selected.statut==="planifié"&&!editMode&&(
-            <button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>
-          )}
+          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>)}
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
-
-        {/* Infos générales */}
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Informations générales</div>
           {selected.numDevis&&<div className="info-row"><span>N° Devis</span><b>{selected.numDevis}</b></div>}
@@ -519,8 +415,6 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
         </div>
-
-        {/* Client */}
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Client</div>
           {selected.clientSociete&&<div className="info-row"><span>Société</span><b>{selected.clientSociete}</b></div>}
@@ -531,10 +425,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Adresse facturation</span><b>{selected.adresseFacturation?<a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseFacturation)}`} target="_blank" rel="noreferrer" style={{color:"#2a9d8f",textDecoration:"underline"}}>{selected.adresseFacturation} 📍</a>:"—"}</b></div>
           <div className="info-row"><span>Adresse intervention</span><b>{selected.adresseIntervention||selected.clientAdresse?<a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention||selected.clientAdresse)}`} target="_blank" rel="noreferrer" style={{color:"#2a9d8f",textDecoration:"underline"}}>{selected.adresseIntervention||selected.clientAdresse} 📍</a>:"—"}</b></div>
         </div>
-
         {selected.demandeClient&&<div className="card" style={{marginBottom:12}}><div className="card-title">Demande client</div><p style={{fontSize:13,lineHeight:1.6,margin:0}}>{selected.demandeClient}</p></div>}
-
-        {/* Suivi */}
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Intervention</div>
           <div className="info-row"><span>Type(s)</span><b>{selected.type}</b></div>
@@ -543,117 +434,23 @@ export default function AdminDashboard({ user, onLogout }) {
           {selected.heureArrivee&&selected.heureFin&&<div className="info-row"><span>Durée</span><b style={{color:"#35B499"}}>{calcDuree(selected.heureArrivee,selected.heureFin)}</b></div>}
           {selected.geoArrivee&&<div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>}
         </div>
-
-        {/* Compte rendu */}
-        <div className="card" style={{marginBottom:12}}>
-          <div className="card-title">Compte rendu</div>
-          <div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div>
-          <div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div>
-        </div>
-
-        {/* ── FACTURATION (bons terminés uniquement) ── */}
-        {selected.statut==="terminé"&&(
-          <div className="card" style={{marginBottom:12}}>
-            <div className="card-title">Facturation</div>
-
-            {/* Progression des étapes */}
-            <div style={{display:"flex",alignItems:"flex-start",gap:0,marginBottom:16}}>
-              {["à facturer","facture envoyée","payé"].map((s,i)=>{
-                const sfCurrent=selected.statutFacture||"à facturer";
-                const sfIndex=["à facturer","facture envoyée","payé"].indexOf(sfCurrent);
-                const done=i<=sfIndex;
-                const st=sfStyle(s);
-                return(
-                  <React.Fragment key={s}>
-                    {i>0&&<div style={{flex:1,height:2,marginTop:11,background:done?"#35B499":"#e0ddd8",transition:"background .3s"}}/>}
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:80}}>
-                      <div style={{width:22,height:22,borderRadius:"50%",background:done?st.bg:"#f5f5f5",border:`2px solid ${done?st.color:"#e0ddd8"}`,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .3s"}}>
-                        {done&&<span style={{fontSize:10,color:st.color,fontWeight:800}}>✓</span>}
-                      </div>
-                      <span style={{fontSize:9,color:done?st.color:"#ccc",fontWeight:done?600:400,textTransform:"capitalize",textAlign:"center",lineHeight:1.3}}>
-                        {s}
-                      </span>
-                    </div>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-
-            {/* N° Facture */}
-            <div className="field" style={{marginBottom:10}}>
-              <label>N° Facture</label>
-              <div style={{display:"flex",gap:8}}>
-                <input
-                  value={editNumFacture}
-                  onChange={e=>setEditNumFacture(e.target.value)}
-                  placeholder="FAC-2026-001"
-                  style={{flex:1,padding:"8px 12px",fontSize:13,border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}
-                />
-                {editNumFacture!==(selected.numFacture||"")&&(
-                  <button onClick={saveNumFacture} disabled={saving}
-                    style={{padding:"8px 14px",borderRadius:8,border:"none",background:"#35B499",color:"white",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>
-                    {saving?"…":"Sauver"}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Dates */}
-            {selected.dateFacture&&<div className="info-row"><span>Facturé le</span><b style={{color:"#3a5ab0"}}>{selected.dateFacture}</b></div>}
-            {selected.datePaiement&&<div className="info-row"><span>Payé le</span><b style={{color:"#35B499"}}>{selected.datePaiement}</b></div>}
-
-            {/* Actions */}
-            <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
-              {(!selected.statutFacture||selected.statutFacture==="à facturer")&&(
-                <button onClick={()=>updateFacturation("facture envoyée")} disabled={saving}
-                  style={{padding:"9px 16px",borderRadius:8,border:"0.5px solid #e8c9b8",background:"#fff8f0",color:"#6b4a31",cursor:"pointer",fontSize:12,fontWeight:600}}>
-                  📄 Marquer facture envoyée
-                </button>
-              )}
-              {selected.statutFacture==="facture envoyée"&&(
-                <>
-                  <button onClick={()=>updateFacturation("payé")} disabled={saving}
-                    style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#35B499",color:"white",cursor:"pointer",fontSize:13,fontWeight:700}}>
-                    ✅ Marquer payée
-                  </button>
-                  <button onClick={()=>updateFacturation("à facturer")} disabled={saving}
-                    style={{padding:"9px 14px",borderRadius:8,border:"0.5px solid #e0ddd8",background:"transparent",color:"#888",cursor:"pointer",fontSize:12}}>
-                    ← Annuler envoi
-                  </button>
-                </>
-              )}
-              {selected.statutFacture==="payé"&&(
-                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  <span style={{color:"#35B499",fontSize:13,fontWeight:700}}>
-                    ✅ Paiement reçu{selected.datePaiement?` le ${selected.datePaiement}`:""}
-                  </span>
-                  <button onClick={()=>updateFacturation("facture envoyée")} disabled={saving}
-                    style={{padding:"5px 10px",borderRadius:7,border:"0.5px solid #e0ddd8",background:"transparent",color:"#888",cursor:"pointer",fontSize:11}}>
-                    Corriger
-                  </button>
-                </div>
-              )}
-            </div>
+        <div className="card" style={{marginBottom:12}}><div className="card-title">Compte rendu</div><div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div><div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div></div>
+        {selected.signatureTech&&<div className="card" style={{marginBottom:12}}><div className="card-title">Signatures</div><div className="row2"><div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>{selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}</div></div>}
+        {selected.statut==="planifié"&&selected.clientTel&&(
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+            <button onClick={()=>envoyerConfirmation(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#e8f5f3",color:"#1a7a65",border:"0.5px solid #35B499",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600}}>
+              📩 Confirmer le RDV
+            </button>
+            <button onClick={()=>envoyerRappel(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#fff8f0",color:"#6b4a31",border:"0.5px solid #e8c9b8",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600}}>
+              🔔 Rappel J-2
+            </button>
           </div>
         )}
-
-        {/* Signatures */}
-        {selected.signatureTech&&(
-          <div className="card" style={{marginBottom:12}}>
-            <div className="card-title">Signatures</div>
-            <div className="row2">
-              <div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>
-              {selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}
-            </div>
-          </div>
-        )}
-
-        {/* Clôture admin */}
         {selected.statut==="en cours"&&(
           <div style={{marginBottom:16,padding:"12px 16px",background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div>
               <p style={{fontSize:13,fontWeight:500,color:"#6b4a31",margin:0}}>Clôturer cette intervention côté admin</p>
-              <p style={{fontSize:11,color:"#888",margin:"2px 0 0"}}>Aucun email ne sera envoyé. Statut facturation sera initialisé.</p>
+              <p style={{fontSize:11,color:"#888",margin:"2px 0 0"}}>Aucun email ne sera envoyé au client.</p>
             </div>
             <button disabled={saving} onClick={terminerBon}
               style={{background:"#35B499",color:"white",border:"none",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}>
@@ -661,22 +458,10 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
           </div>
         )}
-
-        {/* Actions bons terminés */}
-        {selected.statut==="terminé"&&(
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}>
-            <button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>
-            {selected.clientTel&&(
-              <button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>
-                💬 Demander un avis Google
-              </button>
-            )}
-          </div>
-        )}
+        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}><button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>{selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Demander un avis Google</button>}</div>}
       </div>
     );
 
-    /* ── Liste ── */
     if(view==="list") return(
       <div className="ca-content">
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
@@ -690,37 +475,64 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
     );
 
-    /* ── Dashboard ── */
+    // ACCUEIL 360°
     const bonsDuJour=bons.filter(b=>b.datePrevue===today).sort((a,b)=>(a.heurePrevue||"").localeCompare(b.heurePrevue||""));
-    const moisDebut=new Date(new Date().getFullYear(),new Date().getMonth(),1).toLocaleDateString("fr-CA");
-    const bonsMois=bons.filter(b=>b.datePrevue>=moisDebut);
-    const caFacture=bonsMois.filter(b=>b.statut==="terminé").reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0);
-    const caEncaisse=bonsMois.filter(b=>b.statut==="terminé"&&b.statutFacture==="payé").reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0);
-    const terminesMois=bonsMois.filter(b=>b.statut==="terminé").length;
-    const bonsMoisN=bonsMois.length;
-    const taux=bonsMoisN>0?Math.round(terminesMois/bonsMoisN*100):0;
+    const now2=new Date(),day2=now2.getDay(),diff2=day2===0?-6:1-day2;
+    const mon2=new Date(now2);mon2.setDate(now2.getDate()+diff2);mon2.setHours(0,0,0,0);
+    const sat2=new Date(mon2);sat2.setDate(mon2.getDate()+5);sat2.setHours(23,59,59,999);
 
-    const tachesAfaire=taches.filter(t=>t.statut!=="faite").length;
-    const tachesRetard=taches.filter(t=>t.statut!=="faite"&&t.echeance&&t.echeance<today).length;
-    const tachesJour=taches.filter(t=>t.statut!=="faite"&&t.echeance===today).length;
-    const tachesTotRetard=tachesRetard+tachesJour;
+    // Stats taches
+    const tachesAfaire   = taches.filter(t=>t.statut!=="faite").length;
+    const tachesRetard   = taches.filter(t=>t.statut!=="faite"&&t.echeance&&t.echeance<today).length;
+    const tachesJour     = taches.filter(t=>t.statut!=="faite"&&t.echeance===today).length;
+    const tachesTotRetard= tachesRetard + tachesJour;
 
-    const contratsActifs=contrats.filter(c=>c.statut==="actif").length;
-    const caRecurrent=contrats.filter(c=>c.statut==="actif").reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
-    const aRelancerContrats=contrats.filter(c=>{if(c.sc==="résilié")return false;const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();const base=passages.length>0?passages[passages.length-1]:c.dateDebut;if(!base)return false;const nb=parseInt(c.nbPassages)||4;const intDays=Math.round(365/nb);const next=new Date(base+"T00:00:00");next.setDate(next.getDate()+intDays);const diff=Math.ceil((next-new Date())/(1000*60*60*24));return diff<=15;}).length;
-    const contratsAlertes=contrats.filter(c=>{if(c.statut==="résilié")return false;const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();const base=passages.length>0?passages[passages.length-1]:c.dateDebut;if(!base)return false;const nb=parseInt(c.nbPassages)||4;const intDays=Math.round(365/nb);const next=new Date(base+"T00:00:00");next.setDate(next.getDate()+intDays);const diff=Math.ceil((next-new Date())/(1000*60*60*24));return diff<=15;}).slice(0,3);
-    const tachesUrgentes=taches.filter(t=>t.statut!=="faite"&&(t.echeance===today||t.echeance<today)).sort((a,b)=>a.echeance?.localeCompare(b.echeance||"")).slice(0,4);
+    // Stats contrats
+    const contratsActifs = contrats.filter(c=>c.statut==="actif").length;
+
+    const caRecurrent = contrats.filter(c=>c.statut==="actif").reduce((acc,c)=>acc+(parseFloat(c.montantTTC||0)*parseInt(c.nbPassages||0)),0);
+    const aRelancerContrats = contrats.filter(c=>{if(c.sc==="résilié") return false;const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();const base=passages.length>0?passages[passages.length-1]:c.dateDebut;if(!base)return false;const nb=parseInt(c.nbPassages)||4;const intDays=Math.round(365/nb);const next=new Date(base+"T00:00:00");next.setDate(next.getDate()+intDays);const diff=Math.ceil((next-new Date())/(1000*60*60*24));return diff<=15;}).length;
+
+    // Stats bons mois
+    const moisDebut=new Date(now2.getFullYear(),now2.getMonth(),1).toLocaleDateString("fr-CA");
+    const bonsMois    = bons.filter(b=>b.datePrevue>=moisDebut);
+    const caFacture   = bonsMois.filter(b=>b.statut==="terminé").reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0);
+    const bonsMoisN   = bonsMois.length;
+    const terminesMois= bonsMois.filter(b=>b.statut==="terminé").length;
+    const taux        = bonsMoisN>0?Math.round(terminesMois/bonsMoisN*100):0;
+
+    // Contrats alertes
+    // Contrats dont le prochain passage est dans <= 15 jours ou en retard
+    const contratsAlertes = contrats.filter(c=>{
+      if(c.statut==="résilié") return false;
+      const passages=(c.passages||[]).map(p=>p.date).filter(Boolean).sort();
+      const base=passages.length>0?passages[passages.length-1]:c.dateDebut;
+      if(!base) return false;
+      const nb=parseInt(c.nbPassages)||4;
+      const intDays=Math.round(365/nb);
+      const next=new Date(base+"T00:00:00");
+      next.setDate(next.getDate()+intDays);
+      const diff=Math.ceil((next-new Date())/(1000*60*60*24));
+      return diff<=15;
+    }).slice(0,3);
+
+    // Taches urgentes du jour
+    const tachesUrgentes = taches
+      .filter(t=>t.statut!=="faite"&&(t.echeance===today||t.echeance<today))
+      .sort((a,b)=>a.echeance?.localeCompare(b.echeance||""))
+      .slice(0,4);
 
     return(
       <div className="ca-content">
 
+        {/* SECTION 1 : ACTIVITÉ COMMERCIALE */}
         <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Activité commerciale</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
           {[
-            {label:"CA facturé (mois)",    val:caFacture>0?caFacture.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—", accent:"#35B499", sub:`${caEncaisse>0?caEncaisse.toLocaleString("fr-FR")+" € encaissé":"0 € encaissé"}`},
-            {label:"Interventions (mois)", val:bonsMoisN,   accent:"#2a9a82", sub:`${stats.planifie} planifiées · ${stats.enCours} en cours`},
-            {label:"CA récurrent contrats",val:caRecurrent>0?Math.round(caRecurrent).toLocaleString("fr-FR")+" €":"—", accent:"#8B6A4E", sub:"contrats actifs · TTC/an"},
-            {label:"Taux de complétion",   val:taux+" %",   accent:"#b4b2a9", sub:"bons terminés / créés"},
+            {label:"CA facturé (mois)",      val:caFacture>0?caFacture.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—", accent:"#35B499", sub:`${terminesMois} interv. terminées`},
+            {label:"Interventions (mois)",   val:bonsMoisN,    accent:"#2a9a82",  sub:`${stats.planifie} planifiées · ${stats.enCours} en cours`},
+            {label:"CA récurrent contrats",  val:caRecurrent>0?Math.round(caRecurrent).toLocaleString("fr-FR")+" €":"—", accent:"#8B6A4E", sub:"contrats actifs · TTC/an"},
+            {label:"Taux de complétion",     val:taux+" %",    accent:"#b4b2a9",  sub:"bons terminés / créés"},
           ].map(({label,val,accent,sub})=>(
             <div key={label} className="ca-kpi">
               <div className="ca-kpi-accent" style={{background:accent}}/>
@@ -731,27 +543,29 @@ export default function AdminDashboard({ user, onLogout }) {
           ))}
         </div>
 
+        {/* SECTION 2 : OPÉRATIONS & ALERTES */}
         <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Opérations &amp; alertes</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
           {[
-            {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`,                                        onClick:()=>{setFilter("aujourdhui");setView("list");}},
-            {label:"Contrats actifs",       val:contratsActifs,   accent:"#35B499", sub:`sur ${contrats.length} au total`,                                   onClick:()=>setView("contrats")},
-            {label:"Passages à planifier",  val:aRelancerContrats,accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour",                     onClick:()=>setView("contrats")},
-            {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard",                       onClick:()=>setView("taches")},
-            {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence",                    onClick:()=>setView("taches")},
+            {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
+            {label:"Contrats actifs",      val:contratsActifs,      accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
+            {label:"Passages à planifier", val:aRelancerContrats,   accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour", onClick:()=>setView("contrats")},
+            {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
+            {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence", onClick:()=>setView("taches")},
           ].map(({label,val,accent,sub,onClick})=>(
             <div key={label} className="ca-kpi" onClick={onClick} style={{cursor:"pointer"}}>
               <div className="ca-kpi-accent" style={{background:accent}}/>
               <p className="ca-kpi-label">{label}</p>
               <p className="ca-kpi-val">{val}</p>
-              <p style={{fontSize:"9.5px",color:"#888",marginTop:4}}>{sub}</p>
+              <p style={{fontSize:"9.5px",color:accent==="c0392b"?"#c0392b":"#888",marginTop:4}}>{sub}</p>
             </div>
           ))}
         </div>
 
+        {/* SECTION 3 : WIDGETS 3 COLONNES */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
 
-          {/* Interventions du jour */}
+          {/* Bons du jour */}
           <div className="ca-panel">
             <div className="ca-panel-head">
               <span style={{width:7,height:7,borderRadius:"50%",background:"#35B499",display:"inline-block",flexShrink:0}}/>
@@ -762,16 +576,17 @@ export default function AdminDashboard({ user, onLogout }) {
               <div className="ca-empty">Aucune intervention aujourd'hui.</div>
             ):(
               bonsDuJour.slice(0,5).map(b=>{
-                const dotColor=b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#8B6A4E":"#d4f0ea";
-                const dotBorder=b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#8B6A4E":"#35B499";
+                const sc2=b.statut==="terminé"?"terminé":b.statut==="en cours"?"en cours":"planifié";
+                const dotColor=sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#d4f0ea";
+                const dotBorder=sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#35B499";
                 return(
-                  <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",cursor:"pointer"}} onClick={()=>selectBon(b)}>
+                  <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",cursor:"pointer"}} onClick={()=>{setSelected(b);setView("detail");}}>
                     <div style={{width:7,height:7,borderRadius:"50%",background:dotColor,border:`1.5px solid ${dotBorder}`,flexShrink:0}}/>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:11,fontWeight:500,color:"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.clientSociete||b.clientNom+" "+b.clientPrenom}</div>
                       <div style={{fontSize:10,color:"#888"}}>{b.type} · {b.heurePrevue}</div>
                     </div>
-                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#f5e8d8":"#e1f5ee",color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#0e6b50",whiteSpace:"nowrap"}}>{b.statut}</span>
+                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:sc2==="terminé"?"#35B499":sc2==="en cours"?"#f5e8d8":"#e1f5ee",color:sc2==="terminé"?"white":sc2==="en cours"?"#6b4a31":"#0e6b50",whiteSpace:"nowrap"}}>{b.statut}</span>
                   </div>
                 );
               })
@@ -781,7 +596,7 @@ export default function AdminDashboard({ user, onLogout }) {
             </div>
           </div>
 
-          {/* Contrats + Carburant */}
+          {/* Contrats alertes + Carburant */}
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             <div className="ca-panel" style={{flex:1}}>
               <div className="ca-panel-head">
@@ -792,16 +607,19 @@ export default function AdminDashboard({ user, onLogout }) {
               {contratsAlertes.length===0?(
                 <div className="ca-empty">Aucune échéance proche.</div>
               ):(
-                contratsAlertes.map(c=>(
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",cursor:"pointer"}} onClick={()=>navigate("contrats")}>
-                    <div style={{width:7,height:7,borderRadius:"50%",background:"#f5e8d8",border:"1.5px solid #8B6A4E",flexShrink:0}}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{c.clientNom}</div>
-                      <div style={{fontSize:10,color:"#8B6A4E",fontWeight:500}}>Passage à planifier</div>
+                contratsAlertes.map(c=>{
+                  const dj=Math.ceil((new Date(c.dateFin+"T00:00:00")-new Date())/(1000*60*60*24));
+                  return(
+                    <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:dj<=7?"#fff8f4":"transparent",cursor:"pointer"}} onClick={()=>navigate("contrats")}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:"#f5e8d8",border:"1.5px solid #8B6A4E",flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{c.clientNom}</div>
+                        <div style={{fontSize:10,color:"#8B6A4E",fontWeight:500}}>Passage à planifier</div>
+                      </div>
+                      <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#f5e8d8",color:"#6b4a31",whiteSpace:"nowrap"}}>à planifier</span>
                     </div>
-                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#f5e8d8",color:"#6b4a31",whiteSpace:"nowrap"}}>à planifier</span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>navigate("carburant")}>
@@ -810,12 +628,14 @@ export default function AdminDashboard({ user, onLogout }) {
                 <span className="ca-panel-title">Carburant — ce mois</span>
               </div>
               <div style={{padding:"0 14px 12px"}}>
-                <span style={{fontSize:18,fontWeight:700,color:"#1a1a1a",letterSpacing:"-0.5px"}}>Voir le module →</span>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginBottom:6}}>
+                  <span style={{fontSize:18,fontWeight:700,color:"#1a1a1a",letterSpacing:"-0.5px"}}>Voir le module →</span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Tâches */}
+          {/* Tâches du jour */}
           <div className="ca-panel">
             <div className="ca-panel-head">
               <span style={{width:7,height:7,borderRadius:"50%",background:"#c0392b",display:"inline-block",flexShrink:0}}/>
@@ -830,7 +650,9 @@ export default function AdminDashboard({ user, onLogout }) {
                   <div style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${t.echeance<today?"#c0392b":"#35B499"}`,flexShrink:0}}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:11,fontWeight:500,color:t.echeance<today?"#c0392b":"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titre}</div>
-                    <div style={{fontSize:10,color:t.echeance<today?"#c0392b":"#888",marginTop:1}}>{t.echeance<today?`En retard · ${t.categorie}`:t.categorie+" · "+t.priorite}</div>
+                    <div style={{fontSize:10,color:t.echeance<today?"#c0392b":"#888",marginTop:1}}>
+                      {t.echeance<today?`En retard · ${t.categorie}`:t.categorie+" · "+t.priorite}
+                    </div>
                   </div>
                 </div>
               ))
@@ -846,9 +668,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  /* ── Sidebar / topbar ───────────────────────────────────────────────────── */
-
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",devis:"Devis",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -860,16 +680,15 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>navigate("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
-          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#3a5ab0"}}/> Devis{devis.filter(d=>d.statut==="validé").length>0&&<span className="ca-nav-badge" style={{background:"#8B6A4E"}}>{devis.filter(d=>d.statut==="validé").length}</span>}</button>
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
-          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#3a5ab0"}}/> Facturation</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
           <button className={`ca-nav-item${view==="planning"?" active":""}`} onClick={()=>navigate("planning")}>{view==="planning"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5C8EE8"}}/> Planning</button>
+          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
-        {onLogout&&<button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
+        {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
       </div>
-      {sidebarOpen&&<div className="ca-sidebar-overlay open" onClick={()=>setSidebarOpen(false)}/>}
+      {sidebarOpen && <div className="ca-sidebar-overlay open" onClick={()=>setSidebarOpen(false)}/>}
       <div className="ca-main">
         <div className="ca-topbar">
           <button className="ca-hamburger" onClick={()=>setSidebarOpen(o=>!o)}>☰</button>
