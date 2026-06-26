@@ -10,7 +10,7 @@ import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
 import FacturationModule from "./FacturationModule";
-import DevisEncart from "./DevisEncart";
+import DevisModule from "./DevisModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -139,6 +139,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [form,          setForm]          = useState({...EMPTY_FORM});
   const [taches,        setTaches]        = useState([]);
   const [contrats,      setContrats]      = useState([]);
+  const [devis,         setDevis]         = useState([]);
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [editNumFacture,setEditNumFacture]= useState("");   // ← NOUVEAU
 
@@ -148,13 +149,14 @@ export default function AdminDashboard({ user, onLogout }) {
     const id="ca-scoped-styles";
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
-  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
+  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();fetchDevisHome();},[]);
 
   /* ── Fetch ──────────────────────────────────────────────────────────────── */
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome=async()=>{try{const snap=await getDocs(collection(db,"taches"));setTaches(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
   const fetchContratsHome=async()=>{try{const snap=await getDocs(collection(db,"contrats"));setContrats(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
+  const fetchDevisHome=async()=>{try{const snap=await getDocs(collection(db,"devis"));setDevis(snap.docs.map(d=>({id:d.id,...d.data()})));}catch(e){}};
 
   /* ── Helpers ────────────────────────────────────────────────────────────── */
 
@@ -403,11 +405,12 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant")    return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="facturation")  return <div style={{flex:1,overflow:"auto"}}><FacturationModule/></div>;
     if(view==="planning")     return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="taches")       return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
 
-    /* ── Tâches + Encart Devis ── */
-    if(view==="taches") return(
+    /* ── Module Devis ── */
+    if(view==="devis") return(
       <div style={{flex:1,overflow:"auto"}}>
-        <DevisEncart onPlanifier={(d)=>{
+        <DevisModule onPlanifier={(d)=>{
           setForm({
             ...EMPTY_FORM,
             clientNom:          d.clientNom||"",
@@ -423,7 +426,6 @@ export default function AdminDashboard({ user, onLogout }) {
           });
           navigate("new");
         }}/>
-        <TachesModule/>
       </div>
     );
 
@@ -845,7 +847,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
   /* ── Sidebar / topbar ───────────────────────────────────────────────────── */
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",devis:"Devis",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -857,6 +859,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>navigate("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
+          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#3a5ab0"}}/> Devis{devis.filter(d=>d.statut==="validé").length>0&&<span className="ca-nav-badge" style={{background:"#8B6A4E"}}>{devis.filter(d=>d.statut==="validé").length}</span>}</button>
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#3a5ab0"}}/> Facturation</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
