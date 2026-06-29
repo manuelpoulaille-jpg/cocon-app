@@ -443,6 +443,34 @@ export default function DevisModule({ onPlanifier }) {
           </div>
         )}
 
+        {/* Changer le statut librement */}
+        <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:12 }}>
+          <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Statut</p>
+          <div style={{ display:"flex", gap:8 }}>
+            {[
+              { val:"demande",  label:"Demande",   color:"#5c35b4", bg:"#f0eeff" },
+              { val:"validé",   label:"Validé",    color:"#8B6A4E", bg:"#fff8f0" },
+              { val:"planifié", label:"Planifié",  color:"#0e6b50", bg:"#e1f5ee" },
+            ].map(({ val, label, color, bg }) => (
+              <div key={val}
+                onClick={async () => {
+                  if (selected.statut === val) return;
+                  await updateDoc(doc(db, "devis", selected.id), { statut: val });
+                  setSelected(s => ({ ...s, statut: val }));
+                  await fetchDevis();
+                }}
+                style={{
+                  flex:1, padding:"10px 6px", borderRadius:9, cursor:"pointer", textAlign:"center",
+                  border: selected.statut === val ? `2px solid ${color}` : "0.5px solid #e0ddd8",
+                  background: selected.statut === val ? bg : "white",
+                  transition:"all .15s",
+                }}>
+                <p style={{ fontSize:12, fontWeight:700, color: selected.statut === val ? color : "#aaa", margin:0 }}>{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Actions */}
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {selected.statut === "demande" && (
