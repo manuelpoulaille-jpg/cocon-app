@@ -9,6 +9,7 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
+import DevisModule from "./DevisModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -263,26 +264,6 @@ export default function AdminDashboard({ user, onLogout }) {
     if(autoSave)p.save(nom);return p.output("datauristring");
   };
 
-  const fmtDateLong=(str)=>{if(!str)return"—";const d=new Date(str+"T12:00:00");return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});};
-
-  const envoyerConfirmation=(bon)=>{
-    const prenom=bon.clientPrenom||bon.clientNom||"client";
-    const raw=(bon.clientTel||"").replace(/\s/g,"");
-    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")||raw.startsWith("0694")?"596"+raw.slice(1):"596"+raw.slice(1);
-    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
-    const msg=`Bonjour ${prenom} 👋\n\nNous confirmons votre rendez-vous avec Cocon+ :\n\n📅 Le ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue}\n🔧 Intervention : ${bon.type}\n📍 ${adresse}\n\nNotre technicien ${bon.techNom} sera sur place à l'heure prévue. En cas d'empêchement, contactez-nous au 0596 73 66 66.\n\nÀ très bientôt ! 🌿\nL'équipe Cocon+`;
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
-  };
-
-  const envoyerRappel=(bon)=>{
-    const prenom=bon.clientPrenom||bon.clientNom||"client";
-    const raw=(bon.clientTel||"").replace(/\s/g,"");
-    const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")||raw.startsWith("0694")?"596"+raw.slice(1):"596"+raw.slice(1);
-    const adresse=bon.adresseIntervention||bon.clientAdresse||"—";
-    const msg=`Bonjour ${prenom} 👋\n\nRappel : votre intervention Cocon+ a lieu dans 2 jours !\n\n📅 ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue}\n🔧 ${bon.type}\n📍 ${adresse}\n\nPensez à prévoir l'accès au logement 🏠\nUn changement ? Appelez-nous : 0596 73 66 66\n\nÀ bientôt ! 🌿\nL'équipe Cocon+`;
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msg)}`,"_blank");
-  };
-
   const demanderAvis=(bon)=>{
     const prenom=bon.clientPrenom||bon.clientNom||"client";
     const raw=(bon.clientTel||"").replace(/\s/g,"");
@@ -340,6 +321,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="devis") return <div style={{flex:1,overflow:"auto"}}><DevisModule/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -436,16 +418,6 @@ export default function AdminDashboard({ user, onLogout }) {
         </div>
         <div className="card" style={{marginBottom:12}}><div className="card-title">Compte rendu</div><div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div><div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div></div>
         {selected.signatureTech&&<div className="card" style={{marginBottom:12}}><div className="card-title">Signatures</div><div className="row2"><div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>{selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}</div></div>}
-        {selected.statut==="planifié"&&selected.clientTel&&(
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-            <button onClick={()=>envoyerConfirmation(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#e8f5f3",color:"#1a7a65",border:"0.5px solid #35B499",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600}}>
-              📩 Confirmer le RDV
-            </button>
-            <button onClick={()=>envoyerRappel(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#fff8f0",color:"#6b4a31",border:"0.5px solid #e8c9b8",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600}}>
-              🔔 Rappel J-2
-            </button>
-          </div>
-        )}
         {selected.statut==="en cours"&&(
           <div style={{marginBottom:16,padding:"12px 16px",background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div>
@@ -668,7 +640,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",devis:"Devis",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -683,7 +655,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
           <button className={`ca-nav-item${view==="planning"?" active":""}`} onClick={()=>navigate("planning")}>{view==="planning"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5C8EE8"}}/> Planning</button>
-          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
+          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5c35b4"}}/> Devis</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
         {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
