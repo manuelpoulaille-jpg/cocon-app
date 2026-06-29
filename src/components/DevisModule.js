@@ -31,7 +31,7 @@ const StatutBadge = ({ s }) => {
 
 const EMPTY_FORM = {
   clientNom:"", clientSociete:"", clientTel:"",
-  type:"", source:"Téléphone", numDevis:"", notes:"",
+  type:"", source:"Téléphone", numDevis:"", notes:"", statut:"demande",
 };
 
 const fieldStyle = {
@@ -110,7 +110,7 @@ export default function DevisModule({ onPlanifier }) {
     setSaving(true);
     try {
       await addDoc(collection(db, "devis"), {
-        ...form, statut:"demande", createdAt: Timestamp.now(),
+        ...form, statut: form.statut || "demande", createdAt: Timestamp.now(),
       });
       setForm({ ...EMPTY_FORM });
       setView("list");
@@ -235,6 +235,28 @@ export default function DevisModule({ onPlanifier }) {
           <textarea value={form.notes} onChange={e => setForm(f => ({...f, notes:e.target.value}))} rows={3}
             placeholder="Ce qui a été dit, contexte, urgence…"
             style={{ ...fieldStyle, resize:"vertical" }}/>
+        </div>
+      </div>
+
+      <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:14 }}>
+        <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Statut initial</p>
+        <div style={{ display:"flex", gap:8 }}>
+          {[
+            { val:"demande",  label:"Demande",   desc:"Devis pas encore fait",      color:"#5c35b4", bg:"#f0eeff" },
+            { val:"validé",   label:"Validé",    desc:"Client a accepté, à planifier", color:"#8B6A4E", bg:"#fff8f0" },
+            { val:"planifié", label:"Planifié",  desc:"Intervention déjà créée",    color:"#0e6b50", bg:"#e1f5ee" },
+          ].map(({ val, label, desc, color, bg }) => (
+            <div key={val} onClick={() => setForm(f => ({...f, statut:val}))}
+              style={{
+                flex:1, padding:"10px", borderRadius:9, cursor:"pointer",
+                border: form.statut === val ? `2px solid ${color}` : "0.5px solid #e0ddd8",
+                background: form.statut === val ? bg : "white",
+                textAlign:"center", transition:"all .15s",
+              }}>
+              <p style={{ fontSize:12, fontWeight:700, color, margin:"0 0 3px" }}>{label}</p>
+              <p style={{ fontSize:10, color:"#aaa", margin:0, lineHeight:1.3 }}>{desc}</p>
+            </div>
+          ))}
         </div>
       </div>
 
