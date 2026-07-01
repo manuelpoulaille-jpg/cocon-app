@@ -12,6 +12,8 @@ const TYPES = [
 
 const SOURCES = ["Téléphone", "WhatsApp", "Email", "Sur place", "Site web", "Autre"];
 
+const TECHS = ["Dimitri", "Georges", "Equipe"];
+
 const STATUT_CONFIG = {
   "demande": { bg:"#f0eeff", color:"#5c35b4", border:"0.5px solid #c5b8f0", label:"Demande"  },
   "validé":  { bg:"#fff8f0", color:"#8B6A4E", border:"0.5px solid #e8c9b8", label:"Validé"   },
@@ -75,6 +77,8 @@ export default function DevisModule({ onPlanifier }) {
   const [editMode,      setEditMode]      = useState(false);
   const [editForm,      setEditForm]      = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [planFormOpen,  setPlanFormOpen]  = useState(false);
+  const [planForm,      setPlanForm]      = useState({ datePrevue:"", heurePrevue:"08:00", techNom:"" });
 
   /* ── Fetch ────────────────────────────────────────────────────────────── */
 
@@ -163,12 +167,67 @@ export default function DevisModule({ onPlanifier }) {
     } catch(e) { alert("Erreur : " + (e?.message || e)); }
   };
 
-  const planifier = async (d) => {
+  const startPlanification = (d) => {
+    setSelected(d);
+    setEditMode(false);
+    setConfirmDelete(false);
+    setView("detail");
+    setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"" });
+    setPlanFormOpen(true);
+  };
+
+  const confirmerPlanification = async () => {
+    if (!selected || !planForm.datePrevue || !planForm.heurePrevue || !planForm.techNom) return;
+    setSaving(true);
     try {
-      await updateDoc(doc(db, "devis", d.id), { statut:"planifié" });
+      const ref = selected.numDevis
+        ? "INT-" + selected.numDevis.replace(/\D/g, "").slice(-5)
+        : "INT-" + Date.now().toString().slice(-6);
+
+      const bonPayload = {
+        clientSociete:        selected.clientSociete || "",
+        clientNom:             selected.clientNom || "",
+        clientPrenom:          selected.clientPrenom || "",
+        clientTel:             selected.clientTel || "",
+        clientEmail:           selected.clientEmail || "",
+        adresseFacturation:    selected.adresseFacturation || "",
+        adresseIntervention:   selected.adresseIntervention || "",
+        clientAdresse:         selected.adresseIntervention || "",
+        demandeClient:         selected.notes || "",
+        numDevis:              selected.numDevis || "",
+        signataire:            "",
+        types:                 [selected.type],
+        type:                  selected.type,
+        datePrevue:            planForm.datePrevue,
+        heurePrevue:           planForm.heurePrevue,
+        techNom:               planForm.techNom,
+        ref,
+        statut:                "planifié",
+        createdAt:              Timestamp.now(),
+        createdBy:              "",
+        heureArrivee:           null,
+        heureFin:               null,
+        obsCocon:               "",
+        obsClient:              "",
+        signatureTech:          null,
+        signatureClient:        null,
+        emailEnvoye:            false,
+        montantFacture:         selected.montant ? parseFloat(selected.montant) : null,
+        numVisite:              "1",
+        devisId:                selected.id,
+      };
+
+      const bonRef = await addDoc(collection(db, "bons"), bonPayload);
+      await updateDoc(doc(db, "devis", selected.id), { statut: "planifié", bonId: bonRef.id });
+
+      setSelected(s => ({ ...s, statut: "planifié", bonId: bonRef.id }));
+      setPlanFormOpen(false);
       await fetchDevis();
-      if (onPlanifier) onPlanifier(d);
-    } catch(e) { alert("Erreur : " + (e?.message || e)); }
+      if (onPlanifier) onPlanifier({ id: bonRef.id, ...bonPayload });
+    } catch(e) {
+      alert("Erreur lors de la création du bon : " + (e?.message || e));
+    }
+    setSaving(false);
   };
 
   const saveInline = async (key, val) => {
@@ -180,6 +239,7 @@ export default function DevisModule({ onPlanifier }) {
     setSelected(d);
     setEditMode(false);
     setConfirmDelete(false);
+    setPlanFormOpen(false);
     setView("detail");
   };
 
@@ -355,7 +415,7 @@ export default function DevisModule({ onPlanifier }) {
 
         {/* En-tête */}
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:20, flexWrap:"wrap" }}>
-          <button onClick={() => { setView("list"); setSelected(null); setConfirmDelete(false); }}
+          <button onClick={() => { setView("list"); setSelected(null); setConfirmDelete(false); setPlanFormOpen(false); }}
             style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#35B499", fontWeight:600 }}>
             ← Retour
           </button>
@@ -490,9 +550,9 @@ export default function DevisModule({ onPlanifier }) {
               </button>
             </>
           )}
-          {selected.statut === "validé" && (
+          {selected.statut === "validé" && !planFormOpen && (
             <>
-              <button onClick={() => planifier(selected)} style={{
+              <button onClick={() => { setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"" }); setPlanFormOpen(true); }} style={{
                 flex:1, padding:"11px", borderRadius:9, border:"none",
                 background:"#35B499", color:"white", cursor:"pointer", fontSize:13, fontWeight:700,
               }}>
@@ -505,6 +565,62 @@ export default function DevisModule({ onPlanifier }) {
                 ← Demande
               </button>
             </>
+          )}
+          {selected.statut === "validé" && planFormOpen && (
+            <div style={{
+              width:"100%", background:"#f7fdfb", border:"0.5px solid #a0dece",
+              borderRadius:10, padding:16,
+            }}>
+              <p style={{ fontSize:11, fontWeight:700, color:"#0e6b50", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>
+                Créer le bon d'intervention
+              </p>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                <div>
+                  <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Date prévue *</label>
+                  <input type="date" value={planForm.datePrevue}
+                    onChange={e => setPlanForm(f => ({...f, datePrevue:e.target.value}))}
+                    style={inlineField}/>
+                </div>
+                <div>
+                  <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Heure prévue *</label>
+                  <input type="time" value={planForm.heurePrevue}
+                    onChange={e => setPlanForm(f => ({...f, heurePrevue:e.target.value}))}
+                    style={inlineField}/>
+                </div>
+                <div style={{ gridColumn:"span 2" }}>
+                  <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Collaborateur *</label>
+                  <select value={planForm.techNom}
+                    onChange={e => setPlanForm(f => ({...f, techNom:e.target.value}))}
+                    style={{ ...inlineField, padding:"9px 12px" }}>
+                    <option value="">Choisir…</option>
+                    {TECHS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              {!selected.adresseIntervention && (
+                <p style={{ fontSize:11, color:"#c0392b", margin:"0 0 10px" }}>
+                  ⚠️ Aucune adresse d'intervention renseignée ci-dessus — le bon sera créé sans adresse.
+                </p>
+              )}
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={() => setPlanFormOpen(false)} style={{
+                  padding:"10px 14px", borderRadius:9, border:"0.5px solid #e0ddd8",
+                  background:"white", color:"#888", cursor:"pointer", fontSize:12,
+                }}>
+                  Annuler
+                </button>
+                <button
+                  onClick={confirmerPlanification}
+                  disabled={saving || !planForm.datePrevue || !planForm.heurePrevue || !planForm.techNom}
+                  style={{
+                    flex:1, padding:"11px", borderRadius:9, border:"none",
+                    background:"#35B499", color:"white", cursor:"pointer", fontSize:13, fontWeight:700,
+                    opacity:(saving || !planForm.datePrevue || !planForm.heurePrevue || !planForm.techNom) ? 0.4 : 1,
+                  }}>
+                  {saving ? "Création…" : "✅ Créer le bon"}
+                </button>
+              </div>
+            </div>
           )}
           {selected.statut === "planifié" && (
             <p style={{ color:"#35B499", fontSize:13, fontWeight:700, margin:0, padding:"8px 0" }}>
@@ -639,7 +755,7 @@ export default function DevisModule({ onPlanifier }) {
                         }}>📲 WA</button>
                       )}
                       {d.statut === "validé" && (
-                        <button onClick={() => planifier(d)} style={{
+                        <button onClick={() => startPlanification(d)} style={{
                           fontSize:10, padding:"4px 10px", borderRadius:6, border:"none",
                           background:"#35B499", color:"white", cursor:"pointer", fontWeight:700,
                         }}>Planifier →</button>
