@@ -186,6 +186,21 @@ export default function AdminDashboard({ user, onLogout }) {
 
   const deleteBon=async()=>{await deleteDoc(doc(db,"bons",selected.id));setConfirmDelete(false);setSelected(null);setView("list");fetchBons();};
 
+  const cloneBon=(b)=>{
+    setForm({
+      clientSociete:b.clientSociete||"",clientNom:b.clientNom||"",clientPrenom:b.clientPrenom||"",
+      clientTel:b.clientTel||"",clientEmail:b.clientEmail||"",
+      adresseFacturation:b.adresseFacturation||"",adresseIntervention:b.adresseIntervention||b.clientAdresse||"",
+      demandeClient:b.demandeClient||"",numDevis:"",signataire:b.signataire||"",
+      types:b.types||(b.type?b.type.split(", "):[]),
+      datePrevue:"",heurePrevue:b.heurePrevue||"",techId:b.techNom||"",
+      numVisite:b.numVisite?String((parseInt(b.numVisite)||0)+1):"1",montantFacture:"",
+    });
+    setConfirmDelete(false);
+    flashMsg("📋 Bon dupliqué — vérifiez les infos et choisissez une date");
+    setView("new");
+  };
+
   const terminerBon=async()=>{
     if(!selected) return;
     setSaving(true);
@@ -304,6 +319,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
               <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
+                <button title="Dupliquer" style={{fontSize:10,padding:"4px 10px",borderRadius:6,cursor:"pointer",background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #C9BAF0",fontWeight:500,marginLeft:4}} onClick={()=>cloneBon(b)}>📋</button>
               </td>
             </tr>
           ))}
@@ -386,6 +402,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
           {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>)}
+          <button style={{background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #8B6AE8",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>cloneBon(selected)}>📋 Dupliquer</button>
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
         <div className="card" style={{marginBottom:12}}>
