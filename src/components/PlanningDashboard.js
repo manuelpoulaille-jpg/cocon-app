@@ -72,6 +72,23 @@ const defaultHeureFinPrevue = (heurePrevue) => {
   return `${String(Math.min(fin, 20)).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 };
 
+// Liste toutes les dates (YYYY-MM-DD) entre début et fin, incluses
+const getDateRange = (start, end) => {
+  if (!start) return [];
+  const days = [];
+  const cur = new Date(start + "T12:00:00");
+  const last = new Date((end || start) + "T12:00:00");
+  while (cur <= last) {
+    days.push(fmtDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+};
+
+// Formate une date YYYY-MM-DD en libellé court (ex: "mar. 15 juil.")
+const fmtDayShort = (dateStr) =>
+  new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+
 const statutBg = (s) =>
   ({ planifié:"#d4f0ea","en cours":"#fff0e0",terminé:"#35B499" }[s] || "#eee");
 
@@ -152,15 +169,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const handleCellClick = (dateStr, hour) => {
     if (!isAdmin) return;
     const hStr = `${String(hour).padStart(2,"0")}:00`;
-    setForm({ datePrevue:dateStr, heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
+    setForm({ datePrevue:dateStr, horaires:{ [dateStr]:{ debut:hStr, fin:defaultHeureFinPrevue(hStr) } } });
     setFormStep(1);
   };
 
   const handleAddButton = () => {
     const hStr = "08:00";
-    const todayStr = fmtDate(new Date());
-    const defaultDate = todayStr >= rangeStart && todayStr <= rangeEnd ? todayStr : rangeStart;
-    setForm({ datePrevue:defaultDate, heurePrevue:hStr, heureFinPrevue:defaultHeureFinPrevue(hStr) });
+    const defaultDate = fmtDate(new Date());
+    setForm({ datePrevue:defaultDate, horaires:{ [defaultDate]:{ debut:hStr, fin:defaultHeureFinPrevue(hStr) } } });
     setFormStep(1);
   };
 
@@ -169,27 +185,52 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setSelectedBon(bon);
   };
 
+  // Recalcule la map des horaires par jour quand la plage de dates change,
+  // en conservant les horaires déjà saisis pour les jours toujours présents.
+  const syncHoraires = (f) => {
+    const dates = getDateRange(f.datePrevue, f.dateFinPrevue || f.datePrevue);
+    const horaires = {};
+    dates.forEach((d, i) => {
+      if (f.horaires && f.horaires[d]) { horaires[d] = f.horaires[d]; return; }
+      if (i === 0) {
+        horaires[d] = { debut: f.horaires?.[d]?.debut || "08:00", fin: f.horaires?.[d]?.fin || defaultHeureFinPrevue("08:00") };
+      } else {
+        horaires[d] = { debut: "08:00", fin: "17:00" };
+      }
+    });
+    return horaires;
+  };
+
   const createBon = async () => {
     if (!form.clientNom || !form.adresseIntervention) return;
     setSaving(true);
     try {
-      const ref = "INT-" + Date.now().toString().slice(-6);
-      await addDoc(collection(db,"bons"), {
-        ref, clientSociete:form.clientSociete||"", clientNom:form.clientNom||"",
-        clientPrenom:form.clientPrenom||"", clientTel:form.clientTel||"",
-        clientEmail:form.clientEmail||"", adresseFacturation:form.adresseFacturation||"",
-        adresseIntervention:form.adresseIntervention||"", clientAdresse:form.adresseIntervention||"",
-        demandeClient:form.demandeClient||"", numDevis:form.numDevis||"",
-        signataire:form.signataire||"", types:[form.type], type:form.type,
-        datePrevue:form.datePrevue, dateFinPrevue:form.dateFinPrevue||"", heurePrevue:form.heurePrevue, heureFinPrevue:form.heureFinPrevue||"", techNom:form.techNom, techId:"",
-        statut:"planifié", createdAt:Timestamp.now(),
-        heureArrivee:null, heureFin:null, obsCocon:"", obsClient:"",
-        signatureTech:null, signatureClient:null, emailEnvoye:false,
-        montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
-        numVisite:form.numVisite||"1",
-        isRetouche:form.isRetouche||false,
-        statutFacture:"a_facturer",
-      });
+      const dates = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
+      const joursTotal = dates.length;
+      const baseRef = "INT-" + Date.now().toString().slice(-6);
+      for (let i = 0; i < dates.length; i++) {
+        const d = dates[i];
+        const horaire = form.horaires?.[d] || { debut: "08:00", fin: "17:00" };
+        const ref = joursTotal > 1 ? `${baseRef}-J${i + 1}` : baseRef;
+        await addDoc(collection(db,"bons"), {
+          ref, refBase: baseRef, jourNum: i + 1, joursTotal,
+          clientSociete:form.clientSociete||"", clientNom:form.clientNom||"",
+          clientPrenom:form.clientPrenom||"", clientTel:form.clientTel||"",
+          clientEmail:form.clientEmail||"", adresseFacturation:form.adresseFacturation||"",
+          adresseIntervention:form.adresseIntervention||"", clientAdresse:form.adresseIntervention||"",
+          demandeClient:form.demandeClient||"", numDevis:form.numDevis||"",
+          signataire:form.signataire||"", types:[form.type], type:form.type,
+          datePrevue:d, heurePrevue:horaire.debut, heureFinPrevue:horaire.fin, techNom:form.techNom, techId:"",
+          statut:"planifié", createdAt:Timestamp.now(),
+          heureArrivee:null, heureFin:null, obsCocon:"", obsClient:"",
+          signatureTech:null, signatureClient:null, emailEnvoye:false,
+          // Le montant facturé n'est porté que par le bon du 1er jour, pour éviter de le compter plusieurs fois.
+          montantFacture:(i === 0 && form.montantFacture) ? parseFloat(form.montantFacture) : null,
+          numVisite:form.numVisite||"1",
+          isRetouche:form.isRetouche||false,
+          statutFacture:"a_facturer",
+        });
+      }
       setFormStep(null); setForm({}); await fetchData();
     } catch(e) { console.error("Erreur création bon:", e); }
     setSaving(false);
@@ -344,7 +385,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         const client    = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
         const ville     = extractVille(b.adresseIntervention||b.clientAdresse||"");
         const villeStr  = ville ? ` · ${ville}` : "";
-        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}`);
+        const jourStr   = b.joursTotal > 1 ? ` (J${b.jourNum}/${b.joursTotal})` : "";
+        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}${jourStr}`);
       });
 
       if (isMultiPeriod) lines.push("");
@@ -418,7 +460,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── ÉTAPE 1 ───────────────────────────────────────────────────────────────
   if (formStep === 1) {
-    const canGoNext = form.datePrevue && form.heurePrevue && form.heureFinPrevue && form.techNom && form.type;
+    const joursForm = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
+    const horairesOk = joursForm.length > 0 && joursForm.every(d => form.horaires?.[d]?.debut && form.horaires?.[d]?.fin);
+    const canGoNext = form.datePrevue && form.techNom && form.type && horairesOk;
+
+    const updateHoraire = (d, field, value) => {
+      setForm(f => ({ ...f, horaires: { ...f.horaires, [d]: { ...f.horaires?.[d], [field]: value } } }));
+    };
+
     return (
       <div className="container">
         <div className="page-header">
@@ -427,23 +476,56 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <span style={{fontSize:11,color:"var(--color-text-secondary)",background:"var(--color-background-secondary)",padding:"3px 10px",borderRadius:20}}>Étape 1 / 2</span>
         </div>
         <div className="card">
-          <div className="card-title">Créneau &amp; intervention</div>
+          <div className="card-title">Dates</div>
           <div className="row2">
             <div className="field"><label>Date de début *</label>
-              <input type="date" min={rangeStart} max={rangeEnd} value={form.datePrevue||""} onChange={e=>setForm(f=>({...f,datePrevue:e.target.value,dateFinPrevue:f.dateFinPrevue&&f.dateFinPrevue<e.target.value?e.target.value:f.dateFinPrevue}))} />
+              <input type="date" value={form.datePrevue||""} onChange={e=>setForm(f=>{
+                const next = { ...f, datePrevue:e.target.value, dateFinPrevue:f.dateFinPrevue&&f.dateFinPrevue<e.target.value?e.target.value:f.dateFinPrevue };
+                next.horaires = syncHoraires(next);
+                return next;
+              })} />
             </div>
-            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel)</span></label>
-              <input type="date" min={form.datePrevue||rangeStart} max={rangeEnd} value={form.dateFinPrevue||""} onChange={e=>setForm(f=>({...f,dateFinPrevue:e.target.value}))} />
+            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel, si plusieurs jours)</span></label>
+              <input type="date" min={form.datePrevue||""} value={form.dateFinPrevue||""} onChange={e=>setForm(f=>{
+                const next = { ...f, dateFinPrevue:e.target.value };
+                next.horaires = syncHoraires(next);
+                return next;
+              })} />
             </div>
           </div>
-          <div className="row2">
-            <div className="field"><label>Heure de début *</label>
-              <input type="time" value={form.heurePrevue||""} onChange={e=>setForm(f=>({...f,heurePrevue:e.target.value,heureFinPrevue:defaultHeureFinPrevue(e.target.value)}))} />
-            </div>
-            <div className="field"><label>Heure de fin *</label>
-              <input type="time" value={form.heureFinPrevue||""} min={form.heurePrevue||""} onChange={e=>setForm(f=>({...f,heureFinPrevue:e.target.value}))} />
-            </div>
+          {joursForm.length > 1 && (
+            <p style={{fontSize:11,color:"#35B499",fontWeight:600,marginTop:2}}>
+              📅 {joursForm.length} jours — un bon distinct sera créé pour chaque jour
+            </p>
+          )}
+        </div>
+
+        {joursForm.length > 0 && (
+          <div className="card">
+            <div className="card-title">Horaires par jour</div>
+            {joursForm.map((d, i) => (
+              <div key={d} style={{padding:"10px 0",borderBottom:i<joursForm.length-1?"0.5px solid var(--color-border-tertiary)":"none"}}>
+                <p style={{fontSize:12,fontWeight:600,color:"var(--color-text-primary)",marginBottom:6,textTransform:"capitalize"}}>
+                  {joursForm.length > 1 ? `Jour ${i+1} — ` : ""}{fmtDayShort(d)}
+                </p>
+                <div className="row2">
+                  <div className="field" style={{marginBottom:0}}><label>Heure de début *</label>
+                    <input type="time" value={form.horaires?.[d]?.debut||""} onChange={e=>{
+                      updateHoraire(d, "debut", e.target.value);
+                      if (!form.horaires?.[d]?.fin) updateHoraire(d, "fin", defaultHeureFinPrevue(e.target.value));
+                    }} />
+                  </div>
+                  <div className="field" style={{marginBottom:0}}><label>Heure de fin *</label>
+                    <input type="time" value={form.horaires?.[d]?.fin||""} min={form.horaires?.[d]?.debut||""} onChange={e=>updateHoraire(d, "fin", e.target.value)} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
+        )}
+
+        <div className="card">
+          <div className="card-title">Intervention</div>
           <div className="field"><label>Collaborateur *</label>
             <select style={selectStyle} value={form.techNom||""} onChange={e=>setForm(f=>({...f,techNom:e.target.value}))}>
               <option value="">Choisir…</option>
@@ -471,6 +553,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   // ── ÉTAPE 2 ───────────────────────────────────────────────────────────────
   if (formStep === 2) {
     const canSubmit = form.clientNom && form.adresseIntervention;
+    const joursRecap = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
     const dateLabel = new Date(form.datePrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
     return (
       <div className="container">
@@ -481,7 +564,16 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <div className="card readonly" style={{marginBottom:12}}>
           <div className="card-title">Récapitulatif <span className="locked-badge">🔒 Étape 1</span></div>
-          <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel}{form.dateFinPrevue && form.dateFinPrevue !== form.datePrevue ? ` → ${new Date(form.dateFinPrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}` : ""} · {form.heurePrevue} → {form.heureFinPrevue}</b></div>
+          {joursRecap.length > 1 ? (
+            <>
+              <div className="info-row"><span>Durée</span><b>{joursRecap.length} jours → {joursRecap.length} bons liés (J1…J{joursRecap.length})</b></div>
+              {joursRecap.map((d,i) => (
+                <div className="info-row" key={d}><span style={{textTransform:"capitalize"}}>{fmtDayShort(d)}</span><b>{form.horaires?.[d]?.debut} → {form.horaires?.[d]?.fin}</b></div>
+              ))}
+            </>
+          ) : (
+            <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel} · {form.horaires?.[form.datePrevue]?.debut} → {form.horaires?.[form.datePrevue]?.fin}</b></div>
+          )}
           <div className="info-row"><span>Type</span><b>{form.type}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{form.techNom}</b></div>
         </div>
@@ -634,6 +726,9 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="info-row"><span>Collaborateur</span><b style={{color}}>{selectedBon.techNom}</b></div>
           {ville && <div className="info-row"><span>Ville</span><b>📍 {ville}</b></div>}
           <div className="info-row"><span>Réf.</span><b style={{color:"#35B499",fontSize:11}}>{selectedBon.ref}</b></div>
+          {selectedBon.joursTotal > 1 && (
+            <div className="info-row"><span>Intervention liée</span><b>Jour {selectedBon.jourNum} / {selectedBon.joursTotal} — réf. groupe {selectedBon.refBase}</b></div>
+          )}
         </div>
 
         {/* Actions */}
@@ -674,19 +769,19 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="info-row"><span>Réf.</span><b style={{color:"#35B499"}}>{editingBon.ref}</b></div>
         </div>
 
+        {editingBon.joursTotal > 1 && (
+          <div className="card readonly" style={{marginBottom:12,padding:"10px 14px"}}>
+            <p style={{fontSize:11,color:"#35B499",fontWeight:600,margin:0}}>
+              📅 Jour {editingBon.jourNum} sur {editingBon.joursTotal} de cette intervention (réf. groupe {editingBon.refBase})
+            </p>
+          </div>
+        )}
         <div className="card">
           <div className="card-title">Créneau</div>
-          <div className="row2">
-            <div className="field"><label>Date de début *</label>
-              <input type="date" min={rangeStart} max={rangeEnd}
-                value={editingBon.datePrevue||""}
-                onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
-            </div>
-            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel)</span></label>
-              <input type="date" min={editingBon.datePrevue||rangeStart} max={rangeEnd}
-                value={editingBon.dateFinPrevue||""}
-                onChange={e=>setEditingBon(b=>({...b,dateFinPrevue:e.target.value}))} />
-            </div>
+          <div className="field"><label>Date *</label>
+            <input type="date"
+              value={editingBon.datePrevue||""}
+              onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
           </div>
           <div className="row2">
             <div className="field"><label>Heure de début *</label>
@@ -895,9 +990,12 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                     const duration   = isFirstDay ? getDurationHours(b.heurePrevue, b.heureFinPrevue) : getDurationHours("07:00","18:00");
                     const blockH     = isFirstDay ? Math.max(28, duration * CELL_HEIGHT - 4) : GRID_HEIGHT - 4;
 
-                    // Calcul jour X/N pour multi-jours
+                    // Calcul jour X/N pour multi-jours (nouveaux bons : champs jourNum/joursTotal ;
+                    // anciens bons multi-jours "à l'ancienne" : calcul via dateFinPrevue en repli)
                     let dayLabel = null;
-                    if (isMultiDay) {
+                    if (b.joursTotal > 1) {
+                      dayLabel = `Jour ${b.jourNum}/${b.joursTotal}`;
+                    } else if (isMultiDay) {
                       const start = new Date(b.datePrevue + "T12:00:00");
                       const cur   = new Date(dateStr + "T12:00:00");
                       const end   = new Date(b.dateFinPrevue + "T12:00:00");
