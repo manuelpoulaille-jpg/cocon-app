@@ -285,7 +285,50 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setSaving(false);
   };
 
-  // ── WhatsApp ───────────────────────────────────────────────────────────────
+  // ── Confirmation / rappel RDV (par bon) ──────────────────────────────────
+
+  const fmtDateLong = (str) => str
+    ? new Date(str + "T12:00:00").toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
+    : "—";
+
+  const formatTelWa = (telRaw) => {
+    const raw = (telRaw || "").replace(/\s/g, "");
+    if (raw.startsWith("+")) return raw.slice(1);
+    if (raw.startsWith("0696") || raw.startsWith("0697")) return "596" + raw.slice(1); // Martinique
+    if (raw.startsWith("0")) return "33" + raw.slice(1); // France métropolitaine
+    return raw;
+  };
+
+  const applyBonPatch = (bonId, patch) => {
+    setBons(prev => prev.map(b => b.id === bonId ? { ...b, ...patch } : b));
+    setSelectedBon(prev => (prev && prev.id === bonId) ? { ...prev, ...patch } : prev);
+  };
+
+  const envoyerConfirmation = async (bon) => {
+    const prenom  = bon.clientPrenom || bon.clientNom || "client";
+    const tel     = formatTelWa(bon.clientTel);
+    const adresse = bon.adresseIntervention || bon.clientAdresse || "";
+    const texte = `Bonjour ${prenom},\n\nNous vous confirmons votre rendez-vous avec Cocon+ :\n\n📅 ${fmtDateLong(bon.datePrevue)}\n🕐 ${bon.heurePrevue}\n🔧 ${bon.type}${adresse ? `\n📍 ${adresse}` : ""}\n\nNotre équipe sera présente à l'heure prévue.\nPour toute question : 0596 73 66 66\n\nCocon Plus SARL`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(texte)}`, "_blank");
+    try {
+      await updateDoc(doc(db, "bons", bon.id), { confirmationEnvoyee: true, dateConfirmation: Timestamp.now() });
+      applyBonPatch(bon.id, { confirmationEnvoyee: true });
+    } catch(e) { console.error("Erreur confirmation:", e); }
+  };
+
+  const envoyerRappel = async (bon) => {
+    const prenom  = bon.clientPrenom || bon.clientNom || "client";
+    const tel     = formatTelWa(bon.clientTel);
+    const adresse = bon.adresseIntervention || bon.clientAdresse || "";
+    const texte = `Bonjour ${prenom},\n\nPetit rappel : votre rendez-vous Cocon+ est prévu le ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue} pour ${bon.type}.${adresse ? `\n📍 ${adresse}` : ""}\n\nÀ très bientôt,\nCocon Plus SARL`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(texte)}`, "_blank");
+    try {
+      await updateDoc(doc(db, "bons", bon.id), { rappelEnvoye: true, dateRappel: Timestamp.now() });
+      applyBonPatch(bon.id, { rappelEnvoye: true });
+    } catch(e) { console.error("Erreur rappel:", e); }
+  };
+
+  // ── WhatsApp (messages groupés planning) ─────────────────────────────────
 
   const TECH_EMOJIS = { "Dimitri":"🟢", "Georges":"🟠", "Equipe":"🔵" };
 
@@ -704,6 +747,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             {selectedBon.statut}
           </span>
           {selectedBon.isRetouche&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#fdebd0",color:"#a04000"}}>🔧 Retouche</span>}
+          {selectedBon.confirmationEnvoyee&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#e1f5ee",color:"#0e6b50"}}>✅ Confirmé</span>}
+          {selectedBon.rappelEnvoye&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#fff4e6",color:"#8B6A4E"}}>🔔 Rappelé</span>}
         </div>
 
         {/* Résumé */}
@@ -730,6 +775,48 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             <div className="info-row"><span>Intervention liée</span><b>Jour {selectedBon.jourNum} / {selectedBon.joursTotal} — réf. groupe {selectedBon.refBase}</b></div>
           )}
         </div>
+
+        {/* Communication client */}
+        {isAdmin && selectedBon.statut === "planifié" && (
+          <div className="card" style={{marginBottom:12,background:"#f0f9f6",border:"0.5px solid #a0dece"}}>
+            <div className="card-title" style={{color:"#1a7a65"}}>Communication client</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button
+                disabled={!selectedBon.clientTel}
+                onClick={() => envoyerConfirmation(selectedBon)}
+                style={{
+                  flex:1, minWidth:150,
+                  background: selectedBon.confirmationEnvoyee ? "#e1f5ee" : "#25D366",
+                  color: selectedBon.confirmationEnvoyee ? "#0e6b50" : "white",
+                  border: selectedBon.confirmationEnvoyee ? "0.5px solid #a0dece" : "none",
+                  padding:"10px 14px", borderRadius:8,
+                  cursor: selectedBon.clientTel ? "pointer" : "not-allowed",
+                  fontSize:13, fontWeight:600,
+                  opacity: selectedBon.clientTel ? 1 : 0.5,
+                }}>
+                {selectedBon.confirmationEnvoyee ? "✅ Confirmation envoyée" : "📩 Confirmer le RDV"}
+              </button>
+              <button
+                disabled={!selectedBon.clientTel}
+                onClick={() => envoyerRappel(selectedBon)}
+                style={{
+                  flex:1, minWidth:150,
+                  background: selectedBon.rappelEnvoye ? "#fff4e6" : "#25D366",
+                  color: selectedBon.rappelEnvoye ? "#8B6A4E" : "white",
+                  border: selectedBon.rappelEnvoye ? "0.5px solid #e8c9b8" : "none",
+                  padding:"10px 14px", borderRadius:8,
+                  cursor: selectedBon.clientTel ? "pointer" : "not-allowed",
+                  fontSize:13, fontWeight:600,
+                  opacity: selectedBon.clientTel ? 1 : 0.5,
+                }}>
+                {selectedBon.rappelEnvoye ? "🔔 Rappel envoyé" : "🔔 Envoyer rappel"}
+              </button>
+            </div>
+            {!selectedBon.clientTel && (
+              <p style={{fontSize:11,color:"#c0392b",marginTop:8}}>Aucun numéro de téléphone renseigné</p>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1044,11 +1131,15 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                           </div>
                         )}
                         {blockH > 68 && (
-                          <span style={{display:"inline-block",marginTop:2,fontSize:8,padding:"1px 6px",borderRadius:20,
-                            background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#e8c9b8":"#d4f0ea",
-                            color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#1a7a65",
-                            fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
-                            {b.statut}
+                          <span style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:2}}>
+                            <span style={{fontSize:8,padding:"1px 6px",borderRadius:20,
+                              background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#e8c9b8":"#d4f0ea",
+                              color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#1a7a65",
+                              fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
+                              {b.statut}
+                            </span>
+                            {b.confirmationEnvoyee && <span title="Confirmé" style={{fontSize:9}}>✅</span>}
+                            {b.rappelEnvoye && <span title="Rappelé" style={{fontSize:9}}>🔔</span>}
                           </span>
                         )}
                       </div>
