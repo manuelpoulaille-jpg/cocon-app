@@ -24,9 +24,17 @@ const styleFacture = (s) =>
 
 const STATUTS = ["à facturer", "facturé", "payé partiellement", "payé"];
 
+const prochainPaiementDate = (bon) => {
+  if (normFacture(bon.statutFacture) !== "payé partiellement" || !bon.dernierPaiementDate) return null;
+  const d = new Date(bon.dernierPaiementDate + "T00:00:00");
+  d.setMonth(d.getMonth() + 1);
+  return d.toLocaleDateString("fr-CA");
+};
+
 export default function FacturationModule({ bons = [], onOpenBon }) {
   const [filter, setFilter] = useState("tous");
   const [search, setSearch] = useState("");
+  const today = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
 
   // On ne considère que les bons ayant un montant facturé renseigné
   const bonsFactures = bons.filter((b) => b.montantFacture && parseFloat(b.montantFacture) > 0);
@@ -35,8 +43,13 @@ export default function FacturationModule({ bons = [], onOpenBon }) {
     const montantDu = parseFloat(b.montantFacture) || 0;
     const montantPaye = parseFloat(b.montantPaye) || 0;
     const resteDu = montantDu - montantPaye;
-    return { ...b, montantDu, montantPaye, resteDu };
+    const prochainPaiement = prochainPaiementDate(b);
+    return { ...b, montantDu, montantPaye, resteDu, prochainPaiement };
   });
+
+  const relancesPaiement = enrichis
+    .filter((b) => b.prochainPaiement && b.prochainPaiement <= today)
+    .sort((a, b) => (a.prochainPaiement || "").localeCompare(b.prochainPaiement || ""));
 
   const totaux = enrichis.reduce(
     (acc, b) => ({
@@ -66,6 +79,26 @@ export default function FacturationModule({ bons = [], onOpenBon }) {
   return (
     <div style={{ padding: 20 }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#1a1a1a" }}>Facturation</h2>
+
+      {relancesPaiement.length > 0 && (
+        <div style={{ background: "#fff8f0", border: "0.5px solid #f0c48a", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#b5620a", margin: "0 0 8px" }}>
+            🔔 {relancesPaiement.length} paiement{relancesPaiement.length > 1 ? "s" : ""} à relancer
+          </p>
+          {relancesPaiement.map((b) => (
+            <div
+              key={b.id}
+              onClick={() => onOpenBon && onOpenBon(b)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", cursor: onOpenBon ? "pointer" : "default" }}
+            >
+              <span style={{ fontSize: 12, color: "#1a1a1a" }}>
+                <b>{b.clientSociete || b.clientNom + " " + b.clientPrenom}</b> — {b.ref}
+              </span>
+              <span style={{ fontSize: 11, color: "#b5620a", fontWeight: 500 }}>Échéance le {b.prochainPaiement} · reste {b.resteDu.toFixed(2)} €</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20 }}>
         <div style={kpiStyle}>
@@ -129,7 +162,7 @@ export default function FacturationModule({ bons = [], onOpenBon }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 700 }}>
             <thead>
               <tr>
-                {["Réf.", "Date", "Client", "Dû", "Payé", "Reste dû", "Statut", ""].map((h) => (
+                {["Réf.", "Date", "Client", "Dû", "Payé", "Reste dû", "Statut", "Échéance", ""].map((h) => (
                   <th key={h} style={{ textAlign: "left", fontSize: 9.5, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: 0.8, padding: "8px 12px", borderBottom: "0.5px solid #e8e5e0", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
@@ -138,7 +171,7 @@ export default function FacturationModule({ bons = [], onOpenBon }) {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: "20px 14px", fontSize: 13, color: "#aaa", textAlign: "center" }}>Aucun bon facturé trouvé.</td></tr>
+                <tr><td colSpan={9} style={{ padding: "20px 14px", fontSize: 13, color: "#aaa", textAlign: "center" }}>Aucun bon facturé trouvé.</td></tr>
               ) : (
                 filtered.map((b) => (
                   <tr key={b.id} onClick={() => onOpenBon && onOpenBon(b)} style={{ cursor: onOpenBon ? "pointer" : "default" }}>
@@ -155,6 +188,13 @@ export default function FacturationModule({ bons = [], onOpenBon }) {
                       <span style={{ ...styleFacture(b.statutFacture), fontSize: 10, fontWeight: 500, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", display: "inline-block" }}>
                         {normFacture(b.statutFacture)}
                       </span>
+                    </td>
+                    <td style={{ padding: "9px 12px", borderBottom: "0.5px solid #f0ede8" }}>
+                      {b.prochainPaiement ? (
+                        <span style={{ fontSize: 10, fontWeight: 500, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", background: b.prochainPaiement <= today ? "#fde9d0" : "#f0ede8", color: b.prochainPaiement <= today ? "#b5620a" : "#888" }}>
+                          {b.prochainPaiement <= today ? "🔔 " : ""}{b.prochainPaiement}
+                        </span>
+                      ) : "—"}
                     </td>
                     <td style={{ padding: "9px 12px", borderBottom: "0.5px solid #f0ede8" }}>
                       {onOpenBon && <span style={{ fontSize: 11, color: "#35B499", fontWeight: 500 }}>Voir →</span>}

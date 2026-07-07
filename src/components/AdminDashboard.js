@@ -117,6 +117,12 @@ const normFacture=(s)=>{
   const map={"a_facturer":"à facturer","facture":"facturé","paye":"payé","payee":"payé"};
   return map[s]||s;
 };
+const prochainPaiementDate=(bon)=>{
+  if(normFacture(bon.statutFacture)!=="payé partiellement"||!bon.dernierPaiementDate) return null;
+  const d=new Date(bon.dernierPaiementDate+"T00:00:00");
+  d.setMonth(d.getMonth()+1);
+  return d.toLocaleDateString("fr-CA");
+};
 const scFactureStyle=(s)=>({
   "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
   "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
@@ -275,13 +281,14 @@ export default function AdminDashboard({ user, onLogout }) {
         createdAt:Timestamp.now(),
       });
       const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
-      const list=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
       const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
       const montantDu=parseFloat(selected.montantFacture)||0;
       const nouveauStatut=calcStatutAuto(total,montantDu);
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut});
-      setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
-      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut});
+      const dernierPaiementDate=list.length?list[list.length-1].date:null;
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      setPaiements(list);
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
       setPaiementForm({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
       await fetchBons();
       flashMsg("✅ Paiement enregistré — statut : "+nouveauStatut);
@@ -295,13 +302,14 @@ export default function AdminDashboard({ user, onLogout }) {
     try{
       await deleteDoc(doc(db,"bons",selected.id,"paiements",paiementId));
       const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
-      const list=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
       const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
       const montantDu=parseFloat(selected.montantFacture)||0;
       const nouveauStatut=calcStatutAuto(total,montantDu);
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut});
-      setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
-      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut});
+      const dernierPaiementDate=list.length?list[list.length-1].date:null;
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      setPaiements(list);
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
       await fetchBons();
       flashMsg("🗑 Paiement supprimé — statut : "+nouveauStatut);
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
@@ -697,6 +705,12 @@ export default function AdminDashboard({ user, onLogout }) {
       .sort((a,b)=>a.echeance?.localeCompare(b.echeance||""))
       .slice(0,4);
 
+    // Relances de paiement (bons payés partiellement dont le prochain versement est arrivé)
+    const relancesPaiement = bons
+      .map(b=>({...b,prochainPaiement:prochainPaiementDate(b)}))
+      .filter(b=>b.prochainPaiement&&b.prochainPaiement<=today)
+      .sort((a,b)=>(a.prochainPaiement||"").localeCompare(b.prochainPaiement||""));
+
     return(
       <div className="ca-content">
 
@@ -720,11 +734,12 @@ export default function AdminDashboard({ user, onLogout }) {
 
         {/* SECTION 2 : OPÉRATIONS & ALERTES */}
         <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Opérations &amp; alertes</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
           {[
             {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
             {label:"Contrats actifs",      val:contratsActifs,      accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
             {label:"Passages à planifier", val:aRelancerContrats,   accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour", onClick:()=>setView("contrats")},
+            {label:"Relances paiement",    val:relancesPaiement.length, accent:"#b5620a", sub:relancesPaiement.length>0?"Échéance atteinte":"Aucune échéance", onClick:()=>setView("facturation")},
             {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
             {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence", onClick:()=>setView("taches")},
           ].map(({label,val,accent,sub,onClick})=>(
@@ -795,6 +810,28 @@ export default function AdminDashboard({ user, onLogout }) {
                     </div>
                   );
                 })
+              )}
+            </div>
+
+            <div className="ca-panel" style={{flex:1}}>
+              <div className="ca-panel-head">
+                <span style={{width:7,height:7,borderRadius:"50%",background:"#b5620a",display:"inline-block",flexShrink:0}}/>
+                <span className="ca-panel-title">Relances de paiement</span>
+                <span className="ca-panel-count">{relancesPaiement.length} à relancer</span>
+              </div>
+              {relancesPaiement.length===0?(
+                <div className="ca-empty">Aucune échéance de paiement.</div>
+              ):(
+                relancesPaiement.slice(0,4).map(b=>(
+                  <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:"#fff8f0",cursor:"pointer"}} onClick={()=>{setSelected(b);setView("detail");}}>
+                    <div style={{width:7,height:7,borderRadius:"50%",background:"#fde9d0",border:"1.5px solid #b5620a",flexShrink:0}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{b.clientSociete||b.clientNom+" "+b.clientPrenom}</div>
+                      <div style={{fontSize:10,color:"#b5620a",fontWeight:500}}>Échéance le {b.prochainPaiement}</div>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#fde9d0",color:"#b5620a",whiteSpace:"nowrap"}}>à relancer</span>
+                  </div>
+                ))
               )}
             </div>
             <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>navigate("carburant")}>
