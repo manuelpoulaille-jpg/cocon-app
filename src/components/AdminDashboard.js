@@ -10,6 +10,7 @@ import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
 import DevisModule from "./DevisModule";
+import FacturationModule from "./FacturationModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -111,11 +112,16 @@ const SCOPED_CSS = `
 `;
 
 const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="terminé"?"termine":"";
+const normFacture=(s)=>{
+  if(!s) return "à facturer";
+  const map={"a_facturer":"à facturer","facture":"facturé","paye":"payé","payee":"payé"};
+  return map[s]||s;
+};
 const scFactureStyle=(s)=>({
   "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
   "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
   "payé":{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece"},
-}[s||"à facturer"]);
+}[normFacture(s)]);
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
@@ -138,6 +144,9 @@ export default function AdminDashboard({ user, onLogout }) {
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
   const [sidebarOpen,setSidebarOpen]=useState(false);
+  const [paiements,setPaiements]=useState([]);
+  const [paiementForm,setPaiementForm]=useState({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
+  const [loadingPaiements,setLoadingPaiements]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
@@ -145,6 +154,17 @@ export default function AdminDashboard({ user, onLogout }) {
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
   useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
+  useEffect(()=>{
+    if(view==="detail"&&selected?.id){
+      setLoadingPaiements(true);
+      getDocs(collection(db,"bons",selected.id,"paiements"))
+        .then(snap=>setPaiements(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""))))
+        .catch(()=>setPaiements([]))
+        .finally(()=>setLoadingPaiements(false));
+    } else {
+      setPaiements([]);
+    }
+  },[view,selected?.id]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
@@ -236,6 +256,47 @@ export default function AdminDashboard({ user, onLogout }) {
     finally{setSaving(false);}
   };
 
+  const addPaiement=async()=>{
+    if(!selected||!paiementForm.montant||parseFloat(paiementForm.montant)<=0) return;
+    setSaving(true);
+    try{
+      await addDoc(collection(db,"bons",selected.id,"paiements"),{
+        montant:parseFloat(paiementForm.montant),
+        date:paiementForm.date,
+        moyen:paiementForm.moyen,
+        reference:paiementForm.reference||"",
+        createdAt:Timestamp.now(),
+      });
+      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total});
+      setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
+      setSelected({...selected,montantPaye:total});
+      setPaiementForm({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
+      await fetchBons();
+      flashMsg("✅ Paiement enregistré");
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
+  };
+
+  const deletePaiement=async(paiementId)=>{
+    if(!selected) return;
+    setSaving(true);
+    try{
+      await deleteDoc(doc(db,"bons",selected.id,"paiements",paiementId));
+      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total});
+      setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
+      setSelected({...selected,montantPaye:total});
+      await fetchBons();
+      flashMsg("🗑 Paiement supprimé");
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
+  };
+
   const saveEdit=async()=>{
     setSaving(true);
     await updateDoc(doc(db,"bons",selected.id),{
@@ -317,7 +378,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const q=search.toLowerCase();
     const ms=!q||(b.clientNom+" "+b.clientPrenom).toLowerCase().includes(q)||b.ref?.toLowerCase().includes(q)||b.numDevis?.toLowerCase().includes(q)||b.type?.toLowerCase().includes(q)||b.techNom?.toLowerCase().includes(q)||b.statut?.toLowerCase().includes(q);
     const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);
-    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&(b.statutFacture||"à facturer")==="à facturer")||(filter==="facturé"&&b.statutFacture==="facturé")||(filter==="payé"&&b.statutFacture==="payé");
+    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&normFacture(b.statutFacture)==="à facturer")||(filter==="facturé"&&normFacture(b.statutFacture)==="facturé")||(filter==="payé"&&normFacture(b.statutFacture)==="payé");
     return ms&&mf;
   });
 
@@ -336,7 +397,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <td style={{fontSize:12}}>{b.techNom}</td>
               <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
               <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
-              <td><span style={{...scFactureStyle(b.statutFacture),fontSize:10,fontWeight:500,padding:"3px 9px",borderRadius:20,whiteSpace:"nowrap",display:"inline-block"}}>{b.statutFacture||"à facturer"}</span></td>
+              <td><span style={{...scFactureStyle(b.statutFacture),fontSize:10,fontWeight:500,padding:"3px 9px",borderRadius:20,whiteSpace:"nowrap",display:"inline-block"}}>{normFacture(b.statutFacture)}</span></td>
               <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
                 <button title="Dupliquer" style={{fontSize:10,padding:"4px 10px",borderRadius:6,cursor:"pointer",background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #C9BAF0",fontWeight:500,marginLeft:4}} onClick={()=>cloneBon(b)}>📋</button>
@@ -358,6 +419,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
     if(view==="devis") return <div style={{flex:1,overflow:"auto"}}><DevisModule/></div>;
+    if(view==="facturation") return <div style={{flex:1,overflow:"auto"}}><FacturationModule bons={bons} onOpenBon={(b)=>{setSelected(b);setView("detail");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -435,19 +497,86 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
           <div className="info-row">
             <span>Facturation</span>
-            <span style={{...scFactureStyle(selected.statutFacture),fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:20}}>{selected.statutFacture||"à facturer"}</span>
+            <span style={{...scFactureStyle(selected.statutFacture),fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:20}}>{normFacture(selected.statutFacture)}</span>
           </div>
           <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
             {STATUTS_FACTURE.map(s=>(
-              <button key={s} disabled={saving||(selected.statutFacture||"à facturer")===s}
+              <button key={s} disabled={saving||normFacture(selected.statutFacture)===s}
                 onClick={()=>updateStatutFacture(s)}
-                style={{fontSize:11,padding:"6px 12px",borderRadius:8,cursor:(selected.statutFacture||"à facturer")===s?"default":"pointer",
-                  opacity:(selected.statutFacture||"à facturer")===s?0.4:1,
+                style={{fontSize:11,padding:"6px 12px",borderRadius:8,cursor:normFacture(selected.statutFacture)===s?"default":"pointer",
+                  opacity:normFacture(selected.statutFacture)===s?0.4:1,
                   ...scFactureStyle(s),fontWeight:500}}>
                 {s}
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="card" style={{marginBottom:12}}>
+          <div className="card-title">Paiements</div>
+          {(()=>{
+            const montantDu=parseFloat(selected.montantFacture)||0;
+            const montantPaye=paiements.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+            const resteDu=montantDu-montantPaye;
+            return(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+                  <div style={{background:"#f0ede8",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:"#888",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Montant dû</p>
+                    <p style={{fontSize:15,fontWeight:700,color:"#1a1a1a",margin:0}}>{montantDu.toFixed(2)} €</p>
+                  </div>
+                  <div style={{background:"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Encaissé</p>
+                    <p style={{fontSize:15,fontWeight:700,color:"#0e6b50",margin:0}}>{montantPaye.toFixed(2)} €</p>
+                  </div>
+                  <div style={{background:resteDu>0.01?"#fdecea":"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:resteDu>0.01?"#c0392b":"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Reste dû</p>
+                    <p style={{fontSize:15,fontWeight:700,color:resteDu>0.01?"#c0392b":"#0e6b50",margin:0}}>{resteDu.toFixed(2)} €</p>
+                  </div>
+                </div>
+
+                {loadingPaiements?(
+                  <p style={{fontSize:12,color:"#888",textAlign:"center",padding:"8px 0"}}>Chargement…</p>
+                ):paiements.length===0?(
+                  <p style={{fontSize:12,color:"#aaa",textAlign:"center",padding:"8px 0"}}>Aucun paiement enregistré.</p>
+                ):(
+                  <div style={{marginBottom:12}}>
+                    {paiements.map(p=>(
+                      <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:"0.5px solid #f0ede8"}}>
+                        <div>
+                          <span style={{fontSize:13,fontWeight:600,color:"#1a1a1a"}}>{parseFloat(p.montant).toFixed(2)} €</span>
+                          <span style={{fontSize:11,color:"#888",marginLeft:8}}>{p.date} · {p.moyen}{p.reference?" · "+p.reference:""}</span>
+                        </div>
+                        <button onClick={()=>deletePaiement(p.id)} disabled={saving} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:14}}>🗑</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+                  <div style={{flex:"1 1 90px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Montant (€)</label>
+                    <input type="number" step="0.01" value={paiementForm.montant} onChange={e=>setPaiementForm(f=>({...f,montant:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:"1 1 120px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Date</label>
+                    <input type="date" value={paiementForm.date} onChange={e=>setPaiementForm(f=>({...f,date:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:"1 1 110px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Moyen</label>
+                    <select value={paiementForm.moyen} onChange={e=>setPaiementForm(f=>({...f,moyen:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}>
+                      {["Virement","Chèque","Espèces","CB"].map(m=><option key={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div style={{flex:"1 1 110px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Référence</label>
+                    <input value={paiementForm.reference} onChange={e=>setPaiementForm(f=>({...f,reference:e.target.value}))} placeholder="N° chèque…" style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <button disabled={saving||!paiementForm.montant} onClick={addPaiement} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#35B499",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",opacity:!paiementForm.montant?0.5:1}}>+ Ajouter</button>
+                </div>
+              </>
+            );
+          })()}
         </div>
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Client</div>
@@ -719,6 +848,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
           <button className={`ca-nav-item${view==="planning"?" active":""}`} onClick={()=>navigate("planning")}>{view==="planning"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5C8EE8"}}/> Planning</button>
           <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5c35b4"}}/> Devis</button>
+          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#2a9d8f"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
         {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
