@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
 };
+const STATUTS_FACTURE = ["à facturer","facturé","payé"];
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -110,6 +111,11 @@ const SCOPED_CSS = `
 `;
 
 const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="terminé"?"termine":"";
+const scFactureStyle=(s)=>({
+  "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
+  "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
+  "payé":{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece"},
+}[s||"à facturer"]);
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
@@ -177,6 +183,7 @@ export default function AdminDashboard({ user, onLogout }) {
         heureArrivee:null,heureFin:null,obsCocon:"",obsClient:"",
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
+        statutFacture:"à facturer",
         numVisite:form.numVisite||"1",
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
@@ -215,6 +222,18 @@ export default function AdminDashboard({ user, onLogout }) {
     await fetchBons();
     setSaving(false);
     flashMsg("✅ Bon terminé par l'admin.");
+  };
+
+  const updateStatutFacture=async(nouveauStatut)=>{
+    if(!selected) return;
+    setSaving(true);
+    try{
+      await updateDoc(doc(db,"bons",selected.id),{statutFacture:nouveauStatut});
+      setSelected({...selected,statutFacture:nouveauStatut});
+      await fetchBons();
+      flashMsg("✅ Statut de facturation mis à jour");
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
   };
 
   const saveEdit=async()=>{
@@ -298,14 +317,14 @@ export default function AdminDashboard({ user, onLogout }) {
     const q=search.toLowerCase();
     const ms=!q||(b.clientNom+" "+b.clientPrenom).toLowerCase().includes(q)||b.ref?.toLowerCase().includes(q)||b.numDevis?.toLowerCase().includes(q)||b.type?.toLowerCase().includes(q)||b.techNom?.toLowerCase().includes(q)||b.statut?.toLowerCase().includes(q);
     const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);
-    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e);
+    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&(b.statutFacture||"à facturer")==="à facturer")||(filter==="facturé"&&b.statutFacture==="facturé")||(filter==="payé"&&b.statutFacture==="payé");
     return ms&&mf;
   });
 
   const BonsTable=({data,showDate=false})=>(
     <div className="ca-table-wrap">
       <table className="ca-table">
-        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th>Facturation</th><th></th></tr></thead>
         <tbody>
           {data.map(b=>(
             <tr key={b.id} onClick={()=>{setSelected(b);setView("detail");}}>
@@ -317,6 +336,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <td style={{fontSize:12}}>{b.techNom}</td>
               <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
               <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
+              <td><span style={{...scFactureStyle(b.statutFacture),fontSize:10,fontWeight:500,padding:"3px 9px",borderRadius:20,whiteSpace:"nowrap",display:"inline-block"}}>{b.statutFacture||"à facturer"}</span></td>
               <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
                 <button title="Dupliquer" style={{fontSize:10,padding:"4px 10px",borderRadius:6,cursor:"pointer",background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #C9BAF0",fontWeight:500,marginLeft:4}} onClick={()=>cloneBon(b)}>📋</button>
@@ -413,6 +433,21 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
           <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
+          <div className="info-row">
+            <span>Facturation</span>
+            <span style={{...scFactureStyle(selected.statutFacture),fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:20}}>{selected.statutFacture||"à facturer"}</span>
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+            {STATUTS_FACTURE.map(s=>(
+              <button key={s} disabled={saving||(selected.statutFacture||"à facturer")===s}
+                onClick={()=>updateStatutFacture(s)}
+                style={{fontSize:11,padding:"6px 12px",borderRadius:8,cursor:(selected.statutFacture||"à facturer")===s?"default":"pointer",
+                  opacity:(selected.statutFacture||"à facturer")===s?0.4:1,
+                  ...scFactureStyle(s),fontWeight:500}}>
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Client</div>
@@ -459,6 +494,17 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className="ca-btn teal" onClick={()=>setView("new")}>+ Nouveau</button>
         </div>
         {filter&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}><span style={{fontSize:12,color:"#888"}}>Filtre :</span><span style={{background:"#35B499",color:"white",fontSize:12,padding:"3px 10px",borderRadius:20}}>{filter}</span><button onClick={()=>setFilter("")} style={{background:"transparent",border:"none",color:"#888",cursor:"pointer",fontSize:12}}>✕</button></div>}
+        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"#888",alignSelf:"center",marginRight:2}}>Facturation :</span>
+          {STATUTS_FACTURE.map(s=>(
+            <button key={s} onClick={()=>setFilter(filter===s?"":s)}
+              style={{fontSize:11,padding:"5px 12px",borderRadius:20,cursor:"pointer",fontWeight:500,
+                border:filter===s?"none":"0.5px solid #e0ddd8",
+                ...(filter===s?scFactureStyle(s):{background:"white",color:"#555"})}}>
+              {s}
+            </button>
+          ))}
+        </div>
         <div style={{marginBottom:14}}><input type="text" placeholder="Rechercher par client, référence, type…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",padding:"9px 16px",fontSize:13,border:"0.5px solid #e0ddd8",borderRadius:8,background:"white",boxSizing:"border-box"}}/></div>
         <div className="ca-panel">{filteredBons.length===0?<div className="ca-empty">Aucun bon trouvé.</div>:<BonsTable data={filteredBons} showDate/>}</div>
       </div>
