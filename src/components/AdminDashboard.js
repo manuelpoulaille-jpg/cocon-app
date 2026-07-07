@@ -22,7 +22,7 @@ const EMPTY_FORM = {
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
 };
-const STATUTS_FACTURE = ["à facturer","facturé","payé"];
+const STATUTS_FACTURE = ["à facturer","facturé","payé partiellement","payé"];
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -120,6 +120,7 @@ const normFacture=(s)=>{
 const scFactureStyle=(s)=>({
   "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
   "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
+  "payé partiellement":{background:"#fde9d0",color:"#b5620a",border:"0.5px solid #f0c48a"},
   "payé":{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece"},
 }[normFacture(s)]);
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
@@ -256,6 +257,12 @@ export default function AdminDashboard({ user, onLogout }) {
     finally{setSaving(false);}
   };
 
+  const calcStatutAuto=(total,montantDu)=>{
+    if(total<=0) return "à facturer";
+    if(montantDu>0&&total>=montantDu) return "payé";
+    return "payé partiellement";
+  };
+
   const addPaiement=async()=>{
     if(!selected||!paiementForm.montant||parseFloat(paiementForm.montant)<=0) return;
     setSaving(true);
@@ -270,12 +277,14 @@ export default function AdminDashboard({ user, onLogout }) {
       const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
       const list=snap.docs.map(d=>({id:d.id,...d.data()}));
       const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total});
+      const montantDu=parseFloat(selected.montantFacture)||0;
+      const nouveauStatut=calcStatutAuto(total,montantDu);
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut});
       setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
-      setSelected({...selected,montantPaye:total});
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut});
       setPaiementForm({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
       await fetchBons();
-      flashMsg("✅ Paiement enregistré");
+      flashMsg("✅ Paiement enregistré — statut : "+nouveauStatut);
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
     finally{setSaving(false);}
   };
@@ -288,11 +297,13 @@ export default function AdminDashboard({ user, onLogout }) {
       const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
       const list=snap.docs.map(d=>({id:d.id,...d.data()}));
       const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total});
+      const montantDu=parseFloat(selected.montantFacture)||0;
+      const nouveauStatut=calcStatutAuto(total,montantDu);
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut});
       setPaiements(list.sort((a,b)=>(a.date||"").localeCompare(b.date||"")));
-      setSelected({...selected,montantPaye:total});
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut});
       await fetchBons();
-      flashMsg("🗑 Paiement supprimé");
+      flashMsg("🗑 Paiement supprimé — statut : "+nouveauStatut);
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
     finally{setSaving(false);}
   };
@@ -378,7 +389,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const q=search.toLowerCase();
     const ms=!q||(b.clientNom+" "+b.clientPrenom).toLowerCase().includes(q)||b.ref?.toLowerCase().includes(q)||b.numDevis?.toLowerCase().includes(q)||b.type?.toLowerCase().includes(q)||b.techNom?.toLowerCase().includes(q)||b.statut?.toLowerCase().includes(q);
     const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);
-    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&normFacture(b.statutFacture)==="à facturer")||(filter==="facturé"&&normFacture(b.statutFacture)==="facturé")||(filter==="payé"&&normFacture(b.statutFacture)==="payé");
+    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&normFacture(b.statutFacture)==="à facturer")||(filter==="facturé"&&normFacture(b.statutFacture)==="facturé")||(filter==="payé partiellement"&&normFacture(b.statutFacture)==="payé partiellement")||(filter==="payé"&&normFacture(b.statutFacture)==="payé");
     return ms&&mf;
   });
 

@@ -18,10 +18,11 @@ const styleFacture = (s) =>
   ({
     "à facturer": { background: "#fdecea", color: "#c0392b", border: "0.5px solid #f0b8b0" },
     "facturé": { background: "#fdf2d8", color: "#8a6d1f", border: "0.5px solid #e6cf8a" },
+    "payé partiellement": { background: "#fde9d0", color: "#b5620a", border: "0.5px solid #f0c48a" },
     "payé": { background: "#e1f5ee", color: "#0e6b50", border: "0.5px solid #a0dece" },
   }[normFacture(s)]);
 
-const STATUTS = ["à facturer", "facturé", "payé"];
+const STATUTS = ["à facturer", "facturé", "payé partiellement", "payé"];
 
 export default function FacturationModule({ bons = [], onOpenBon }) {
   const [filter, setFilter] = useState("tous");
