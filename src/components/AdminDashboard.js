@@ -9,8 +9,6 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
-import DevisModule from "./DevisModule";
-import FacturationModule from "./FacturationModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -22,7 +20,6 @@ const EMPTY_FORM = {
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
 };
-const STATUTS_FACTURE = ["à facturer","facturé","payé partiellement","payé"];
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -112,23 +109,6 @@ const SCOPED_CSS = `
 `;
 
 const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="terminé"?"termine":"";
-const normFacture=(s)=>{
-  if(!s) return "à facturer";
-  const map={"a_facturer":"à facturer","facture":"facturé","paye":"payé","payee":"payé"};
-  return map[s]||s;
-};
-const prochainPaiementDate=(bon)=>{
-  if(normFacture(bon.statutFacture)!=="payé partiellement"||!bon.dernierPaiementDate) return null;
-  const d=new Date(bon.dernierPaiementDate+"T00:00:00");
-  d.setMonth(d.getMonth()+1);
-  return d.toLocaleDateString("fr-CA");
-};
-const scFactureStyle=(s)=>({
-  "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
-  "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
-  "payé partiellement":{background:"#fde9d0",color:"#b5620a",border:"0.5px solid #f0c48a"},
-  "payé":{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece"},
-}[normFacture(s)]);
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
@@ -151,9 +131,6 @@ export default function AdminDashboard({ user, onLogout }) {
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
   const [sidebarOpen,setSidebarOpen]=useState(false);
-  const [paiements,setPaiements]=useState([]);
-  const [paiementForm,setPaiementForm]=useState({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
-  const [loadingPaiements,setLoadingPaiements]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
@@ -161,17 +138,6 @@ export default function AdminDashboard({ user, onLogout }) {
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
   useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
-  useEffect(()=>{
-    if(view==="detail"&&selected?.id){
-      setLoadingPaiements(true);
-      getDocs(collection(db,"bons",selected.id,"paiements"))
-        .then(snap=>setPaiements(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""))))
-        .catch(()=>setPaiements([]))
-        .finally(()=>setLoadingPaiements(false));
-    } else {
-      setPaiements([]);
-    }
-  },[view,selected?.id]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
@@ -210,7 +176,6 @@ export default function AdminDashboard({ user, onLogout }) {
         heureArrivee:null,heureFin:null,obsCocon:"",obsClient:"",
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
-        statutFacture:"à facturer",
         numVisite:form.numVisite||"1",
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
@@ -219,21 +184,6 @@ export default function AdminDashboard({ user, onLogout }) {
   };
 
   const deleteBon=async()=>{await deleteDoc(doc(db,"bons",selected.id));setConfirmDelete(false);setSelected(null);setView("list");fetchBons();};
-
-  const cloneBon=(b)=>{
-    setForm({
-      clientSociete:b.clientSociete||"",clientNom:b.clientNom||"",clientPrenom:b.clientPrenom||"",
-      clientTel:b.clientTel||"",clientEmail:b.clientEmail||"",
-      adresseFacturation:b.adresseFacturation||"",adresseIntervention:b.adresseIntervention||b.clientAdresse||"",
-      demandeClient:b.demandeClient||"",numDevis:"",signataire:b.signataire||"",
-      types:b.types||(b.type?b.type.split(", "):[]),
-      datePrevue:"",heurePrevue:b.heurePrevue||"",techId:b.techNom||"",
-      numVisite:b.numVisite?String((parseInt(b.numVisite)||0)+1):"1",montantFacture:"",
-    });
-    setConfirmDelete(false);
-    flashMsg("📋 Bon dupliqué — vérifiez les infos et choisissez une date");
-    setView("new");
-  };
 
   const terminerBon=async()=>{
     if(!selected) return;
@@ -249,71 +199,6 @@ export default function AdminDashboard({ user, onLogout }) {
     await fetchBons();
     setSaving(false);
     flashMsg("✅ Bon terminé par l'admin.");
-  };
-
-  const updateStatutFacture=async(nouveauStatut)=>{
-    if(!selected) return;
-    setSaving(true);
-    try{
-      await updateDoc(doc(db,"bons",selected.id),{statutFacture:nouveauStatut});
-      setSelected({...selected,statutFacture:nouveauStatut});
-      await fetchBons();
-      flashMsg("✅ Statut de facturation mis à jour");
-    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
-    finally{setSaving(false);}
-  };
-
-  const calcStatutAuto=(total,montantDu)=>{
-    if(total<=0) return "à facturer";
-    if(montantDu>0&&total>=montantDu) return "payé";
-    return "payé partiellement";
-  };
-
-  const addPaiement=async()=>{
-    if(!selected||!paiementForm.montant||parseFloat(paiementForm.montant)<=0) return;
-    setSaving(true);
-    try{
-      await addDoc(collection(db,"bons",selected.id,"paiements"),{
-        montant:parseFloat(paiementForm.montant),
-        date:paiementForm.date,
-        moyen:paiementForm.moyen,
-        reference:paiementForm.reference||"",
-        createdAt:Timestamp.now(),
-      });
-      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
-      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
-      const montantDu=parseFloat(selected.montantFacture)||0;
-      const nouveauStatut=calcStatutAuto(total,montantDu);
-      const dernierPaiementDate=list.length?list[list.length-1].date:null;
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
-      setPaiements(list);
-      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
-      setPaiementForm({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
-      await fetchBons();
-      flashMsg("✅ Paiement enregistré — statut : "+nouveauStatut);
-    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
-    finally{setSaving(false);}
-  };
-
-  const deletePaiement=async(paiementId)=>{
-    if(!selected) return;
-    setSaving(true);
-    try{
-      await deleteDoc(doc(db,"bons",selected.id,"paiements",paiementId));
-      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
-      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
-      const montantDu=parseFloat(selected.montantFacture)||0;
-      const nouveauStatut=calcStatutAuto(total,montantDu);
-      const dernierPaiementDate=list.length?list[list.length-1].date:null;
-      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
-      setPaiements(list);
-      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
-      await fetchBons();
-      flashMsg("🗑 Paiement supprimé — statut : "+nouveauStatut);
-    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
-    finally{setSaving(false);}
   };
 
   const saveEdit=async()=>{
@@ -380,9 +265,10 @@ export default function AdminDashboard({ user, onLogout }) {
 
   const demanderAvis=(bon)=>{
     const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const typeMinuscule=bon.type?bon.type.charAt(0).toLowerCase()+bon.type.slice(1):"intervention";
     const raw=(bon.clientTel||"").replace(/\s/g,"");
     const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${bon.type} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${typeMinuscule} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
   };
 
   const stats={
@@ -397,14 +283,14 @@ export default function AdminDashboard({ user, onLogout }) {
     const q=search.toLowerCase();
     const ms=!q||(b.clientNom+" "+b.clientPrenom).toLowerCase().includes(q)||b.ref?.toLowerCase().includes(q)||b.numDevis?.toLowerCase().includes(q)||b.type?.toLowerCase().includes(q)||b.techNom?.toLowerCase().includes(q)||b.statut?.toLowerCase().includes(q);
     const now=new Date(),s=new Date(now);s.setDate(now.getDate()-now.getDay());const e=new Date(s);e.setDate(s.getDate()+6);
-    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e)||(filter==="à facturer"&&normFacture(b.statutFacture)==="à facturer")||(filter==="facturé"&&normFacture(b.statutFacture)==="facturé")||(filter==="payé partiellement"&&normFacture(b.statutFacture)==="payé partiellement")||(filter==="payé"&&normFacture(b.statutFacture)==="payé");
+    const mf=!filter||(filter==="planifié"&&b.statut==="planifié")||(filter==="en cours"&&b.statut==="en cours")||(filter==="terminé"&&b.statut==="terminé")||(filter==="aujourdhui"&&b.datePrevue===today)||(filter==="semaine"&&new Date(b.datePrevue)>=s&&new Date(b.datePrevue)<=e);
     return ms&&mf;
   });
 
   const BonsTable=({data,showDate=false})=>(
     <div className="ca-table-wrap">
       <table className="ca-table">
-        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th>Facturation</th><th></th></tr></thead>
+        <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
         <tbody>
           {data.map(b=>(
             <tr key={b.id} onClick={()=>{setSelected(b);setView("detail");}}>
@@ -416,10 +302,8 @@ export default function AdminDashboard({ user, onLogout }) {
               <td style={{fontSize:12}}>{b.techNom}</td>
               <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
               <td><span className={`ca-badge ${scBadge(b.statut)}`}>{b.statut}</span></td>
-              <td><span style={{...scFactureStyle(b.statutFacture),fontSize:10,fontWeight:500,padding:"3px 9px",borderRadius:20,whiteSpace:"nowrap",display:"inline-block"}}>{normFacture(b.statutFacture)}</span></td>
               <td onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
-                <button title="Dupliquer" style={{fontSize:10,padding:"4px 10px",borderRadius:6,cursor:"pointer",background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #C9BAF0",fontWeight:500,marginLeft:4}} onClick={()=>cloneBon(b)}>📋</button>
               </td>
             </tr>
           ))}
@@ -437,8 +321,6 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
-    if(view==="devis") return <div style={{flex:1,overflow:"auto"}}><DevisModule/></div>;
-    if(view==="facturation") return <div style={{flex:1,overflow:"auto"}}><FacturationModule bons={bons} onOpenBon={(b)=>{setSelected(b);setView("detail");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -503,7 +385,6 @@ export default function AdminDashboard({ user, onLogout }) {
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
           {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>)}
-          <button style={{background:"#EFEAF9",color:"#5c35b4",border:"0.5px solid #8B6AE8",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>cloneBon(selected)}>📋 Dupliquer</button>
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
         <div className="card" style={{marginBottom:12}}>
@@ -514,88 +395,6 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
           <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
-          <div className="info-row">
-            <span>Facturation</span>
-            <span style={{...scFactureStyle(selected.statutFacture),fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:20}}>{normFacture(selected.statutFacture)}</span>
-          </div>
-          <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
-            {STATUTS_FACTURE.map(s=>(
-              <button key={s} disabled={saving||normFacture(selected.statutFacture)===s}
-                onClick={()=>updateStatutFacture(s)}
-                style={{fontSize:11,padding:"6px 12px",borderRadius:8,cursor:normFacture(selected.statutFacture)===s?"default":"pointer",
-                  opacity:normFacture(selected.statutFacture)===s?0.4:1,
-                  ...scFactureStyle(s),fontWeight:500}}>
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="card" style={{marginBottom:12}}>
-          <div className="card-title">Paiements</div>
-          {(()=>{
-            const montantDu=parseFloat(selected.montantFacture)||0;
-            const montantPaye=paiements.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
-            const resteDu=montantDu-montantPaye;
-            return(
-              <>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
-                  <div style={{background:"#f0ede8",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <p style={{fontSize:9,color:"#888",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Montant dû</p>
-                    <p style={{fontSize:15,fontWeight:700,color:"#1a1a1a",margin:0}}>{montantDu.toFixed(2)} €</p>
-                  </div>
-                  <div style={{background:"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <p style={{fontSize:9,color:"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Encaissé</p>
-                    <p style={{fontSize:15,fontWeight:700,color:"#0e6b50",margin:0}}>{montantPaye.toFixed(2)} €</p>
-                  </div>
-                  <div style={{background:resteDu>0.01?"#fdecea":"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                    <p style={{fontSize:9,color:resteDu>0.01?"#c0392b":"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Reste dû</p>
-                    <p style={{fontSize:15,fontWeight:700,color:resteDu>0.01?"#c0392b":"#0e6b50",margin:0}}>{resteDu.toFixed(2)} €</p>
-                  </div>
-                </div>
-
-                {loadingPaiements?(
-                  <p style={{fontSize:12,color:"#888",textAlign:"center",padding:"8px 0"}}>Chargement…</p>
-                ):paiements.length===0?(
-                  <p style={{fontSize:12,color:"#aaa",textAlign:"center",padding:"8px 0"}}>Aucun paiement enregistré.</p>
-                ):(
-                  <div style={{marginBottom:12}}>
-                    {paiements.map(p=>(
-                      <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:"0.5px solid #f0ede8"}}>
-                        <div>
-                          <span style={{fontSize:13,fontWeight:600,color:"#1a1a1a"}}>{parseFloat(p.montant).toFixed(2)} €</span>
-                          <span style={{fontSize:11,color:"#888",marginLeft:8}}>{p.date} · {p.moyen}{p.reference?" · "+p.reference:""}</span>
-                        </div>
-                        <button onClick={()=>deletePaiement(p.id)} disabled={saving} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:14}}>🗑</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
-                  <div style={{flex:"1 1 90px"}}>
-                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Montant (€)</label>
-                    <input type="number" step="0.01" value={paiementForm.montant} onChange={e=>setPaiementForm(f=>({...f,montant:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
-                  </div>
-                  <div style={{flex:"1 1 120px"}}>
-                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Date</label>
-                    <input type="date" value={paiementForm.date} onChange={e=>setPaiementForm(f=>({...f,date:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
-                  </div>
-                  <div style={{flex:"1 1 110px"}}>
-                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Moyen</label>
-                    <select value={paiementForm.moyen} onChange={e=>setPaiementForm(f=>({...f,moyen:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}>
-                      {["Virement","Chèque","Espèces","CB"].map(m=><option key={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div style={{flex:"1 1 110px"}}>
-                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Référence</label>
-                    <input value={paiementForm.reference} onChange={e=>setPaiementForm(f=>({...f,reference:e.target.value}))} placeholder="N° chèque…" style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
-                  </div>
-                  <button disabled={saving||!paiementForm.montant} onClick={addPaiement} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#35B499",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",opacity:!paiementForm.montant?0.5:1}}>+ Ajouter</button>
-                </div>
-              </>
-            );
-          })()}
         </div>
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Client</div>
@@ -642,17 +441,6 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className="ca-btn teal" onClick={()=>setView("new")}>+ Nouveau</button>
         </div>
         {filter&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}><span style={{fontSize:12,color:"#888"}}>Filtre :</span><span style={{background:"#35B499",color:"white",fontSize:12,padding:"3px 10px",borderRadius:20}}>{filter}</span><button onClick={()=>setFilter("")} style={{background:"transparent",border:"none",color:"#888",cursor:"pointer",fontSize:12}}>✕</button></div>}
-        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-          <span style={{fontSize:11,color:"#888",alignSelf:"center",marginRight:2}}>Facturation :</span>
-          {STATUTS_FACTURE.map(s=>(
-            <button key={s} onClick={()=>setFilter(filter===s?"":s)}
-              style={{fontSize:11,padding:"5px 12px",borderRadius:20,cursor:"pointer",fontWeight:500,
-                border:filter===s?"none":"0.5px solid #e0ddd8",
-                ...(filter===s?scFactureStyle(s):{background:"white",color:"#555"})}}>
-              {s}
-            </button>
-          ))}
-        </div>
         <div style={{marginBottom:14}}><input type="text" placeholder="Rechercher par client, référence, type…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",padding:"9px 16px",fontSize:13,border:"0.5px solid #e0ddd8",borderRadius:8,background:"white",boxSizing:"border-box"}}/></div>
         <div className="ca-panel">{filteredBons.length===0?<div className="ca-empty">Aucun bon trouvé.</div>:<BonsTable data={filteredBons} showDate/>}</div>
       </div>
@@ -705,12 +493,6 @@ export default function AdminDashboard({ user, onLogout }) {
       .sort((a,b)=>a.echeance?.localeCompare(b.echeance||""))
       .slice(0,4);
 
-    // Relances de paiement (bons payés partiellement dont le prochain versement est arrivé)
-    const relancesPaiement = bons
-      .map(b=>({...b,prochainPaiement:prochainPaiementDate(b)}))
-      .filter(b=>b.prochainPaiement&&b.prochainPaiement<=today)
-      .sort((a,b)=>(a.prochainPaiement||"").localeCompare(b.prochainPaiement||""));
-
     return(
       <div className="ca-content">
 
@@ -734,12 +516,11 @@ export default function AdminDashboard({ user, onLogout }) {
 
         {/* SECTION 2 : OPÉRATIONS & ALERTES */}
         <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Opérations &amp; alertes</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
           {[
             {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
             {label:"Contrats actifs",      val:contratsActifs,      accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
             {label:"Passages à planifier", val:aRelancerContrats,   accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour", onClick:()=>setView("contrats")},
-            {label:"Relances paiement",    val:relancesPaiement.length, accent:"#b5620a", sub:relancesPaiement.length>0?"Échéance atteinte":"Aucune échéance", onClick:()=>setView("facturation")},
             {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
             {label:"Tâches du jour",        val:tachesTotRetard,  accent:"#8B6A4E", sub:tachesTotRetard>0?"dont retards":"Aucune urgence", onClick:()=>setView("taches")},
           ].map(({label,val,accent,sub,onClick})=>(
@@ -812,28 +593,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 })
               )}
             </div>
-
-            <div className="ca-panel" style={{flex:1}}>
-              <div className="ca-panel-head">
-                <span style={{width:7,height:7,borderRadius:"50%",background:"#b5620a",display:"inline-block",flexShrink:0}}/>
-                <span className="ca-panel-title">Relances de paiement</span>
-                <span className="ca-panel-count">{relancesPaiement.length} à relancer</span>
-              </div>
-              {relancesPaiement.length===0?(
-                <div className="ca-empty">Aucune échéance de paiement.</div>
-              ):(
-                relancesPaiement.slice(0,4).map(b=>(
-                  <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:".5px solid #f0ede8",background:"#fff8f0",cursor:"pointer"}} onClick={()=>{setSelected(b);setView("detail");}}>
-                    <div style={{width:7,height:7,borderRadius:"50%",background:"#fde9d0",border:"1.5px solid #b5620a",flexShrink:0}}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#1a1a1a"}}>{b.clientSociete||b.clientNom+" "+b.clientPrenom}</div>
-                      <div style={{fontSize:10,color:"#b5620a",fontWeight:500}}>Échéance le {b.prochainPaiement}</div>
-                    </div>
-                    <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:"#fde9d0",color:"#b5620a",whiteSpace:"nowrap"}}>à relancer</span>
-                  </div>
-                ))
-              )}
-            </div>
             <div className="ca-panel" style={{cursor:"pointer"}} onClick={()=>navigate("carburant")}>
               <div className="ca-panel-head" style={{borderBottom:"none"}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:"#2a9a82",display:"inline-block",flexShrink:0}}/>
@@ -880,7 +639,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",devis:"Devis",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -895,8 +654,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button className={`ca-nav-item${view==="taches"?" active":""}`} onClick={()=>setView("taches")}>{view==="taches"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(192,57,43,0.7)"}}/> Tâches{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length>0&&<span className="ca-nav-badge" style={{background:"#c0392b"}}>{taches.filter(t=>t.statut!=="faite"&&t.echeance<=today).length}</span>}</button>
           <button className={`ca-nav-item${view==="carburant"?" active":""}`} onClick={()=>setView("carburant")}>{view==="carburant"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Carburant</button>
           <button className={`ca-nav-item${view==="planning"?" active":""}`} onClick={()=>navigate("planning")}>{view==="planning"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5C8EE8"}}/> Planning</button>
-          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5c35b4"}}/> Devis</button>
-          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#2a9d8f"}}/> Facturation</button>
+          <button className={`ca-nav-item${view==="facturation"?" active":""}`} onClick={()=>navigate("facturation")}>{view==="facturation"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"rgba(255,255,255,0.25)"}}/> Facturation</button>
         </div>
         <div className="ca-user-area"><div className="ca-avatar">JM</div><div><p className="ca-user-name">Jean-Marc S.</p><p className="ca-user-role">Administrateur</p></div></div>
         {onLogout && <button onClick={onLogout} style={{margin:"0 12px 16px",padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:8,color:"rgba(255,255,255,0.45)",fontSize:11,cursor:"pointer",width:"calc(100% - 24px)",textAlign:"left"}}>🚪 Déconnexion</button>}
