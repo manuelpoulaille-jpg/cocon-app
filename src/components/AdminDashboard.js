@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
 };
+const STATUTS_FACTURE = ["à facturer","facturé","payé partiellement","payé"];
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -110,6 +111,17 @@ const SCOPED_CSS = `
 `;
 
 const scBadge=(s)=>s==="planifié"?"planifie":s==="en cours"?"encours":s==="terminé"?"termine":"";
+const normFacture=(s)=>{
+  if(!s) return "à facturer";
+  const map={"a_facturer":"à facturer","facture":"facturé","paye":"payé","payee":"payé"};
+  return map[s]||s;
+};
+const scFactureStyle=(s)=>({
+  "à facturer":{background:"#fdecea",color:"#c0392b",border:"0.5px solid #f0b8b0"},
+  "facturé":{background:"#fdf2d8",color:"#8a6d1f",border:"0.5px solid #e6cf8a"},
+  "payé partiellement":{background:"#fde9d0",color:"#b5620a",border:"0.5px solid #f0c48a"},
+  "payé":{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece"},
+}[normFacture(s)]);
 const fmt=(ts)=>ts?new Date(ts.toDate()).toLocaleString("fr-FR"):"—";
 const calcDuree=(a,f)=>{if(!a||!f)return"—";const d=f.toDate()-a.toDate();const h=Math.floor(d/3600000),m=Math.floor((d%3600000)/60000);return h>0?h+"h"+m.toString().padStart(2,"0"):m+" min";};
 const fmtDate=(str)=>str?new Date(str+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}):"—";
@@ -132,6 +144,9 @@ export default function AdminDashboard({ user, onLogout }) {
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
   const [sidebarOpen,setSidebarOpen]=useState(false);
+  const [paiements,setPaiements]=useState([]);
+  const [paiementForm,setPaiementForm]=useState({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
+  const [loadingPaiements,setLoadingPaiements]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
   useEffect(()=>{
@@ -139,6 +154,17 @@ export default function AdminDashboard({ user, onLogout }) {
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
   useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
+  useEffect(()=>{
+    if(view==="detail"&&selected?.id){
+      setLoadingPaiements(true);
+      getDocs(collection(db,"bons",selected.id,"paiements"))
+        .then(snap=>setPaiements(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""))))
+        .catch(()=>setPaiements([]))
+        .finally(()=>setLoadingPaiements(false));
+    } else {
+      setPaiements([]);
+    }
+  },[view,selected?.id]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
@@ -177,6 +203,7 @@ export default function AdminDashboard({ user, onLogout }) {
         heureArrivee:null,heureFin:null,obsCocon:"",obsClient:"",
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
+        statutFacture:"à facturer",
         numVisite:form.numVisite||"1",
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
@@ -200,6 +227,71 @@ export default function AdminDashboard({ user, onLogout }) {
     await fetchBons();
     setSaving(false);
     flashMsg("✅ Bon terminé par l'admin.");
+  };
+
+  const updateStatutFacture=async(nouveauStatut)=>{
+    if(!selected) return;
+    setSaving(true);
+    try{
+      await updateDoc(doc(db,"bons",selected.id),{statutFacture:nouveauStatut});
+      setSelected({...selected,statutFacture:nouveauStatut});
+      await fetchBons();
+      flashMsg("✅ Statut de facturation mis à jour");
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
+  };
+
+  const calcStatutAuto=(total,montantDu)=>{
+    if(total<=0) return "à facturer";
+    if(montantDu>0&&total>=montantDu) return "payé";
+    return "payé partiellement";
+  };
+
+  const addPaiement=async()=>{
+    if(!selected||!paiementForm.montant||parseFloat(paiementForm.montant)<=0) return;
+    setSaving(true);
+    try{
+      await addDoc(collection(db,"bons",selected.id,"paiements"),{
+        montant:parseFloat(paiementForm.montant),
+        date:paiementForm.date,
+        moyen:paiementForm.moyen,
+        reference:paiementForm.reference||"",
+        createdAt:Timestamp.now(),
+      });
+      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+      const montantDu=parseFloat(selected.montantFacture)||0;
+      const nouveauStatut=calcStatutAuto(total,montantDu);
+      const dernierPaiementDate=list.length?list[list.length-1].date:null;
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      setPaiements(list);
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      setPaiementForm({montant:"",date:new Date().toLocaleDateString("fr-CA"),moyen:"Virement",reference:""});
+      await fetchBons();
+      flashMsg("✅ Paiement enregistré — statut : "+nouveauStatut);
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
+  };
+
+  const deletePaiement=async(paiementId)=>{
+    if(!selected) return;
+    setSaving(true);
+    try{
+      await deleteDoc(doc(db,"bons",selected.id,"paiements",paiementId));
+      const snap=await getDocs(collection(db,"bons",selected.id,"paiements"));
+      const list=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+      const total=list.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+      const montantDu=parseFloat(selected.montantFacture)||0;
+      const nouveauStatut=calcStatutAuto(total,montantDu);
+      const dernierPaiementDate=list.length?list[list.length-1].date:null;
+      await updateDoc(doc(db,"bons",selected.id),{montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      setPaiements(list);
+      setSelected({...selected,montantPaye:total,statutFacture:nouveauStatut,dernierPaiementDate});
+      await fetchBons();
+      flashMsg("🗑 Paiement supprimé — statut : "+nouveauStatut);
+    }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
+    finally{setSaving(false);}
   };
 
   const saveEdit=async()=>{
@@ -397,6 +489,88 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Référence</span><b>{selected.ref}</b></div>
           <div className="info-row"><span>Date prévue</span><b>{selected.datePrevue} à {selected.heurePrevue}</b></div>
           <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
+          <div className="info-row">
+            <span>Facturation</span>
+            <span style={{...scFactureStyle(selected.statutFacture),fontSize:11,fontWeight:500,padding:"3px 10px",borderRadius:20}}>{normFacture(selected.statutFacture)}</span>
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+            {STATUTS_FACTURE.map(s=>(
+              <button key={s} disabled={saving||normFacture(selected.statutFacture)===s}
+                onClick={()=>updateStatutFacture(s)}
+                style={{fontSize:11,padding:"6px 12px",borderRadius:8,cursor:normFacture(selected.statutFacture)===s?"default":"pointer",
+                  opacity:normFacture(selected.statutFacture)===s?0.4:1,
+                  ...scFactureStyle(s),fontWeight:500}}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="card" style={{marginBottom:12}}>
+          <div className="card-title">Paiements</div>
+          {(()=>{
+            const montantDu=parseFloat(selected.montantFacture)||0;
+            const montantPaye=paiements.reduce((acc,p)=>acc+(parseFloat(p.montant)||0),0);
+            const resteDu=montantDu-montantPaye;
+            return(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+                  <div style={{background:"#f0ede8",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:"#888",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Montant dû</p>
+                    <p style={{fontSize:15,fontWeight:700,color:"#1a1a1a",margin:0}}>{montantDu.toFixed(2)} €</p>
+                  </div>
+                  <div style={{background:"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Encaissé</p>
+                    <p style={{fontSize:15,fontWeight:700,color:"#0e6b50",margin:0}}>{montantPaye.toFixed(2)} €</p>
+                  </div>
+                  <div style={{background:resteDu>0.01?"#fdecea":"#e1f5ee",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <p style={{fontSize:9,color:resteDu>0.01?"#c0392b":"#0e6b50",textTransform:"uppercase",letterSpacing:0.5,margin:"0 0 3px"}}>Reste dû</p>
+                    <p style={{fontSize:15,fontWeight:700,color:resteDu>0.01?"#c0392b":"#0e6b50",margin:0}}>{resteDu.toFixed(2)} €</p>
+                  </div>
+                </div>
+
+                {loadingPaiements?(
+                  <p style={{fontSize:12,color:"#888",textAlign:"center",padding:"8px 0"}}>Chargement…</p>
+                ):paiements.length===0?(
+                  <p style={{fontSize:12,color:"#aaa",textAlign:"center",padding:"8px 0"}}>Aucun paiement enregistré.</p>
+                ):(
+                  <div style={{marginBottom:12}}>
+                    {paiements.map(p=>(
+                      <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:"0.5px solid #f0ede8"}}>
+                        <div>
+                          <span style={{fontSize:13,fontWeight:600,color:"#1a1a1a"}}>{parseFloat(p.montant).toFixed(2)} €</span>
+                          <span style={{fontSize:11,color:"#888",marginLeft:8}}>{p.date} · {p.moyen}{p.reference?" · "+p.reference:""}</span>
+                        </div>
+                        <button onClick={()=>deletePaiement(p.id)} disabled={saving} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:14}}>🗑</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+                  <div style={{flex:"1 1 90px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Montant (€)</label>
+                    <input type="number" step="0.01" value={paiementForm.montant} onChange={e=>setPaiementForm(f=>({...f,montant:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:"1 1 120px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Date</label>
+                    <input type="date" value={paiementForm.date} onChange={e=>setPaiementForm(f=>({...f,date:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:"1 1 110px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Moyen</label>
+                    <select value={paiementForm.moyen} onChange={e=>setPaiementForm(f=>({...f,moyen:e.target.value}))} style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}>
+                      {["Virement","Chèque","Espèces","CB"].map(m=><option key={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div style={{flex:"1 1 110px"}}>
+                    <label style={{fontSize:11,color:"#888",display:"block",marginBottom:3}}>Référence</label>
+                    <input value={paiementForm.reference} onChange={e=>setPaiementForm(f=>({...f,reference:e.target.value}))} placeholder="N° chèque…" style={{width:"100%",padding:"7px 10px",fontSize:12,border:"0.5px solid #e0ddd8",borderRadius:8,boxSizing:"border-box"}}/>
+                  </div>
+                  <button disabled={saving||!paiementForm.montant} onClick={addPaiement} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#35B499",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",opacity:!paiementForm.montant?0.5:1}}>+ Ajouter</button>
+                </div>
+              </>
+            );
+          })()}
         </div>
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Client</div>
