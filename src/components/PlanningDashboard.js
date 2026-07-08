@@ -1,896 +1,1245 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection,
-  getDocs,
-  addDoc,
-  deleteDoc,
-  doc,
+  collection, getDocs, addDoc, deleteDoc, doc, updateDoc, Timestamp,
 } from "firebase/firestore";
 
-// Couleurs attribuées aux collaborateurs
-const TECH_COLORS = [
-  "#35B499",
-  "#E8845C",
-  "#5C8EE8",
-  "#E85C9A",
-  "#8E5CE8",
-  "#C8A84B",
+const TECH_COLORS_MAP = {
+  "Dimitri": "#35B499",
+  "Georges": "#E8845C",
+  "Equipe":  "#5C8EE8",
+};
+const TECH_COLORS_ARRAY = ["#35B499","#E8845C","#5C8EE8","#E85C9A","#8E5CE8","#C8A84B"];
+const HOURS = Array.from({ length: 12 }, (_, i) => i + 7);
+const TYPES_INTERVENTION = [
+  "Dératisation","Désinsectisation","Désinfection",
+  "Anti-termites","Anti-chauves-souris","Étanchéité","Rénovation toiture","Autre",
 ];
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const TECHS_DEFAULT = ["Dimitri","Georges","Equipe"];
+const CELL_HEIGHT = 68;
 
 const fmtDate = (d) =>
-  d.toLocaleDateString("fr-CA", { timeZone: "America/Martinique" }); // YYYY-MM-DD
+  d.toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
 
-const fmtDayLabel = (d) =>
-  d.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    timeZone: "America/Martinique",
-  });
-
-const getWeekDays = () => {
-  const today = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Martinique" })
-  );
-  const day = today.getDay(); // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + diff);
-  monday.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, i) => {
+const getWeekFrom = (monday) =>
+  Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     return d;
   });
+
+const getCurrentMonday = () => {
+  // Récupère la date actuelle en Martinique sous forme "YYYY-MM-DD"
+  const todayStr = new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
+  // Utilise midi (T12:00:00) pour éviter tout décalage de jour lors des conversions timezone
+  const today = new Date(todayStr + "T12:00:00");
+  const day = today.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diff);
+  return monday;
 };
 
+const extractVille = (adresse) => {
+  if (!adresse) return "";
+  const match = adresse.match(/972\d{2}\s+([^,\n]+)/i);
+  return match ? match[1].trim() : "";
+};
+
+// Calcule la durée en heures entre deux heures "HH:MM"
+const getDurationHours = (debut, fin) => {
+  if (!debut || !fin) return 1;
+  const [dh, dm] = debut.split(":").map(Number);
+  const [fh, fm] = fin.split(":").map(Number);
+  const duration = (fh * 60 + fm - dh * 60 - dm) / 60;
+  return Math.max(0.25, duration);
+};
+
+// Calcule le décalage vertical en px depuis le début de la grille (7h = 0)
+const getTopOffset = (heure) => {
+  if (!heure) return 0;
+  const [h, m] = heure.split(":").map(Number);
+  return (h - 7 + m / 60) * CELL_HEIGHT;
+};
+
+const GRID_HEIGHT = 12 * CELL_HEIGHT; // 7h → 18h
+
+// Calcule l'heure de fin par défaut (+2h)
+const defaultHeureFinPrevue = (heurePrevue) => {
+  if (!heurePrevue) return "10:00";
+  const [h, m] = heurePrevue.split(":").map(Number);
+  const fin = h + 2;
+  return `${String(Math.min(fin, 20)).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+};
+
+// Liste toutes les dates (YYYY-MM-DD) entre début et fin, incluses
+const getDateRange = (start, end) => {
+  if (!start) return [];
+  const days = [];
+  const cur = new Date(start + "T12:00:00");
+  const last = new Date((end || start) + "T12:00:00");
+  while (cur <= last) {
+    days.push(fmtDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+};
+
+// Formate une date YYYY-MM-DD en libellé court (ex: "mar. 15 juil.")
+const fmtDayShort = (dateStr) =>
+  new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+
 const statutBg = (s) =>
-  ({ planifié: "#d4f0ea", "en cours": "#e8c9b8", terminé: "#35B499" }[s] ||
-  "#eee");
-const statutFg = (s) =>
-  ({
-    planifié: "#1a7a65",
-    "en cours": "#6b4a31",
-    terminé: "white",
-  }[s] || "#333");
+  ({ planifié:"#d4f0ea","en cours":"#fff0e0",terminé:"#35B499" }[s] || "#eee");
 
-const TYPES_INTERVENTION = [
-  "Dératisation",
-  "Désinsectisation",
-  "Désinfection",
-  "Traitement anti-termites",
-  "Traitement anti-chauves-souris",
-  "Étanchéité",
-  "Rénovation toiture",
-  "Autre",
-];
-
-// ── Composant principal ───────────────────────────────────────────────────────
-
-export default function PlanningDashboard({ user, isAdmin: isAdminProp }) {
-  // isAdminProp peut être passé directement depuis AdminDashboard (toujours true)
-  // Sinon, déduire depuis user.role pour une utilisation future dans TechDashboard
+export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBon }) {
   const isAdmin = isAdminProp !== undefined ? isAdminProp : user?.role === "admin";
 
-  const [weekDays] = useState(getWeekDays());
-  const [bons, setBons] = useState([]);
-  const [indispos, setIndispos] = useState([]);
-  const [techColors, setTechColors] = useState({});
-  const [filterTech, setFilterTech] = useState("tous");
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [weekOffset, setWeekOffset] = useState(0);
 
-  // Formulaire création rapide
-  const [quickFormDate, setQuickFormDate] = useState(null);
-  const [form, setForm] = useState({});
+  const getMonday = (offset) => {
+    const currentMonday = getCurrentMonday();
+    const m = new Date(currentMonday);
+    m.setDate(currentMonday.getDate() + offset * 7);
+    return m;
+  };
 
-  // Formulaire indisponibilité
+  const monday     = getMonday(weekOffset);
+  const week1      = getWeekFrom(monday);
+  const rangeStart = fmtDate(week1[0]);
+  const rangeEnd   = fmtDate(week1[6]);
+
+  const [bons, setBons]             = useState([]);
+  const [indispos, setIndispos]     = useState([]);
+  const [techColors, setTechColors] = useState({ ...TECH_COLORS_MAP });
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [formStep, setFormStep]     = useState(null);
+  const [form, setForm]             = useState({});
+  const [selectedBon, setSelectedBon] = useState(null);
+  const [editingBon,  setEditingBon]  = useState(null);
+  const [waPanel,  setWaPanel]  = useState(false);
+  const [waMessage, setWaMessage] = useState("");
+  const [waNextWeekBons, setWaNextWeekBons] = useState([]);
+  const [waCopied, setWaCopied] = useState(false);
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
-  const [indispoData, setIndispoData] = useState({
-    techNom: "",
-    dateDebut: "",
-    dateFin: "",
-    motif: "Congé",
-  });
+  const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // ── Fetch ──────────────────────────────────────────────────────────────────
+  useEffect(() => { fetchData(); }, [weekOffset]);
 
   const fetchData = async () => {
     setLoading(true);
-    const weekStart = fmtDate(weekDays[0]);
-    const weekEnd = fmtDate(weekDays[6]);
-
     try {
-      // Bons de la semaine
-      const bonsSnap = await getDocs(collection(db, "bons"));
-      const allBons = bonsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const weekBons = allBons.filter(
-        (b) => b.datePrevue >= weekStart && b.datePrevue <= weekEnd
-      );
-      setBons(weekBons);
-
-      // Couleurs par technicien
-      const names = [...new Set(weekBons.map((b) => b.techNom).filter(Boolean))];
-      const colors = {};
-      names.forEach((name, i) => {
-        colors[name] = TECH_COLORS[i % TECH_COLORS.length];
-      });
+      const bonsSnap = await getDocs(collection(db,"bons"));
+      const allBons  = bonsSnap.docs.map(d => ({ id:d.id,...d.data() }));
+      const filtered = allBons.filter(b => b.datePrevue >= rangeStart && b.datePrevue <= rangeEnd);
+      setBons(filtered);
+      const names = [...new Set(filtered.map(b=>b.techNom).filter(Boolean))];
+      const colors = { ...TECH_COLORS_MAP };
+      names.forEach((name,i) => { if (!colors[name]) colors[name] = TECH_COLORS_ARRAY[i % TECH_COLORS_ARRAY.length]; });
       setTechColors(colors);
-
-      // Indisponibilités
-      const indisposSnap = await getDocs(collection(db, "indispos"));
-      setIndispos(
-        indisposSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-      );
-    } catch (e) {
-      console.error("Planning fetchData error:", e);
-    }
+      const indisposSnap = await getDocs(collection(db,"indispos"));
+      setIndispos(indisposSnap.docs.map(d => ({ id:d.id,...d.data() })));
+    } catch(e) { console.error("Planning fetchData error:", e); }
     setLoading(false);
   };
 
-  // ── Données dérivées ───────────────────────────────────────────────────────
+  const techList = [...new Set([...TECHS_DEFAULT,...bons.map(b=>b.techNom).filter(Boolean)])];
 
-  const techList = [...new Set(bons.map((b) => b.techNom).filter(Boolean))];
-
-  const getBonsForDay = (day) => {
+  const getBonsForSlot = (day, hour) => {
     const dateStr = fmtDate(day);
-    return bons
-      .filter(
-        (b) =>
-          b.datePrevue === dateStr &&
-          (filterTech === "tous" || b.techNom === filterTech)
-      )
-      .sort((a, b) => (a.heurePrevue || "").localeCompare(b.heurePrevue || ""));
+    return bons.filter(b => {
+      // Bon multi-jours : apparaît si dateStr est dans l'intervalle
+      const start = b.datePrevue;
+      const end   = b.dateFinPrevue || b.datePrevue;
+      if (dateStr < start || dateStr > end) return false;
+      // Pour l'heure : on ne filtre par heure que sur le jour de début
+      if (dateStr === start) {
+        const h = parseInt((b.heurePrevue||"0:00").split(":")[0]);
+        return h === hour;
+      }
+      // Sur les jours suivants, afficher dans le premier créneau (7h)
+      return hour === 7;
+    });
   };
 
-  const getIndisposForDay = (day) => {
-    const dateStr = fmtDate(day);
-    return indispos.filter(
-      (i) =>
-        i.dateDebut <= dateStr &&
-        i.dateFin >= dateStr &&
-        (filterTech === "tous" || i.techNom === filterTech)
-    );
+  const isToday      = (day) => fmtDate(day) === fmtDate(new Date());
+  const isDayIndispo = (dateStr) => indispos.some(i => i.dateDebut <= dateStr && i.dateFin >= dateStr);
+
+  const handleCellClick = (dateStr, hour) => {
+    if (!isAdmin) return;
+    const hStr = `${String(hour).padStart(2,"0")}:00`;
+    setForm({ datePrevue:dateStr, horaires:{ [dateStr]:{ debut:hStr, fin:defaultHeureFinPrevue(hStr) } } });
+    setFormStep(1);
   };
 
-  const isToday = (day) => fmtDate(day) === fmtDate(new Date());
+  const handleAddButton = () => {
+    const hStr = "08:00";
+    const defaultDate = fmtDate(new Date());
+    setForm({ datePrevue:defaultDate, horaires:{ [defaultDate]:{ debut:hStr, fin:defaultHeureFinPrevue(hStr) } } });
+    setFormStep(1);
+  };
 
-  const totalWeek = bons.filter(
-    (b) => filterTech === "tous" || b.techNom === filterTech
-  ).length;
+  const handleBonClick = (e, bon) => {
+    e.stopPropagation();
+    setSelectedBon(bon);
+  };
 
-  const totalTermines = bons.filter(
-    (b) =>
-      b.statut === "terminé" &&
-      (filterTech === "tous" || b.techNom === filterTech)
-  ).length;
+  // Recalcule la map des horaires par jour quand la plage de dates change,
+  // en conservant les horaires déjà saisis pour les jours toujours présents.
+  const syncHoraires = (f) => {
+    const dates = getDateRange(f.datePrevue, f.dateFinPrevue || f.datePrevue);
+    const horaires = {};
+    dates.forEach((d, i) => {
+      if (f.horaires && f.horaires[d]) { horaires[d] = f.horaires[d]; return; }
+      if (i === 0) {
+        horaires[d] = { debut: f.horaires?.[d]?.debut || "08:00", fin: f.horaires?.[d]?.fin || defaultHeureFinPrevue("08:00") };
+      } else {
+        horaires[d] = { debut: "08:00", fin: "17:00" };
+      }
+    });
+    return horaires;
+  };
 
-  // ── Actions ────────────────────────────────────────────────────────────────
-
-  const createQuickBon = async () => {
-    if (!form.clientNom || !form.type || !form.techNom) return;
+  const createBon = async () => {
+    if (!form.clientNom || !form.adresseIntervention) return;
     setSaving(true);
     try {
-      const ref = "INT-" + Date.now().toString().slice(-6);
-      await addDoc(collection(db, "bons"), {
-        ref,
-        clientNom: form.clientNom || "",
-        clientPrenom: form.clientPrenom || "",
-        clientTel: form.clientTel || "",
-        clientEmail: form.clientEmail || "",
-        clientAdresse: "",
-        adresseFacturation: "",
-        adresseIntervention: "",
-        type: form.type,
-        datePrevue: quickFormDate,
-        heurePrevue: form.heurePrevue || "08:00",
-        techNom: form.techNom,
-        techId: "",
-        statut: "planifié",
-        demandeClient: form.demandeClient || "",
-        obsCocon: "",
-        obsClient: "",
-      });
-      setQuickFormDate(null);
-      setForm({});
-      await fetchData();
-    } catch (e) {
-      console.error("Erreur création bon:", e);
-    }
+      const dates = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
+      const joursTotal = dates.length;
+      const baseRef = "INT-" + Date.now().toString().slice(-6);
+      for (let i = 0; i < dates.length; i++) {
+        const d = dates[i];
+        const horaire = form.horaires?.[d] || { debut: "08:00", fin: "17:00" };
+        const ref = joursTotal > 1 ? `${baseRef}-J${i + 1}` : baseRef;
+        await addDoc(collection(db,"bons"), {
+          ref, refBase: baseRef, jourNum: i + 1, joursTotal,
+          clientSociete:form.clientSociete||"", clientNom:form.clientNom||"",
+          clientPrenom:form.clientPrenom||"", clientTel:form.clientTel||"",
+          clientEmail:form.clientEmail||"", adresseFacturation:form.adresseFacturation||"",
+          adresseIntervention:form.adresseIntervention||"", clientAdresse:form.adresseIntervention||"",
+          demandeClient:form.demandeClient||"", numDevis:form.numDevis||"",
+          signataire:form.signataire||"", types:[form.type], type:form.type,
+          datePrevue:d, heurePrevue:horaire.debut, heureFinPrevue:horaire.fin, techNom:form.techNom, techId:"",
+          statut:"planifié", createdAt:Timestamp.now(),
+          heureArrivee:null, heureFin:null, obsCocon:"", obsClient:"",
+          signatureTech:null, signatureClient:null, emailEnvoye:false,
+          // Le montant facturé n'est porté que par le bon du 1er jour, pour éviter de le compter plusieurs fois.
+          montantFacture:(i === 0 && form.montantFacture) ? parseFloat(form.montantFacture) : null,
+          numVisite:form.numVisite||"1",
+          isRetouche:form.isRetouche||false,
+          statutFacture:"a_facturer",
+        });
+      }
+      setFormStep(null); setForm({}); await fetchData();
+    } catch(e) { console.error("Erreur création bon:", e); }
     setSaving(false);
   };
 
+  const [indispoError, setIndispoError] = useState("");
+
   const createIndispo = async () => {
-    if (!indispoData.techNom || !indispoData.dateDebut || !indispoData.dateFin)
-      return;
+    if (!indispoData.techNom||!indispoData.dateDebut) return;
     setSaving(true);
+    setIndispoError("");
     try {
-      await addDoc(collection(db, "indispos"), indispoData);
+      const dataToSave = {
+        techNom:   indispoData.techNom,
+        dateDebut: indispoData.dateDebut,
+        dateFin:   indispoData.jourUnique ? indispoData.dateDebut : indispoData.dateFin,
+        motif:     indispoData.motif,
+      };
+      await addDoc(collection(db,"indispos"), dataToSave);
       setIndispoFormOpen(false);
-      setIndispoData({ techNom: "", dateDebut: "", dateFin: "", motif: "Congé" });
+      setIndispoData({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
+      setIndispoError("");
       await fetchData();
-    } catch (e) {
-      console.error("Erreur création indispo:", e);
+    } catch(e) {
+      console.error("Erreur indispo:", e);
+      setIndispoError("Erreur : " + (e?.message || "Vérifiez les règles Firestore pour la collection 'indispos'"));
     }
     setSaving(false);
   };
 
   const deleteIndispo = async (id) => {
-    try {
-      await deleteDoc(doc(db, "indispos", id));
-      await fetchData();
-    } catch (e) {
-      console.error("Erreur suppression indispo:", e);
-    }
+    try { await deleteDoc(doc(db,"indispos",id)); await fetchData(); } catch(e) {}
   };
 
-  // ── Styles partagés ────────────────────────────────────────────────────────
+  const saveEditBon = async () => {
+    if (!editingBon) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db,"bons",editingBon.id), {
+        datePrevue:     editingBon.datePrevue,
+        dateFinPrevue:  editingBon.dateFinPrevue || "",
+        heurePrevue:    editingBon.heurePrevue,
+        heureFinPrevue: editingBon.heureFinPrevue || "",
+        techNom:        editingBon.techNom,
+        type:           editingBon.type,
+        types:          [editingBon.type],
+      });
+      setEditingBon(null);
+      setSelectedBon(null);
+      await fetchData();
+    } catch(e) { console.error("Erreur modification bon:", e); }
+    setSaving(false);
+  };
+
+  // ── Confirmation / rappel RDV (par bon) ──────────────────────────────────
+
+  const fmtDateLong = (str) => str
+    ? new Date(str + "T12:00:00").toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
+    : "—";
+
+  const formatTelWa = (telRaw) => {
+    const raw = (telRaw || "").replace(/\s/g, "");
+    if (raw.startsWith("+")) return raw.slice(1);
+    if (raw.startsWith("0696") || raw.startsWith("0697")) return "596" + raw.slice(1); // Martinique
+    if (raw.startsWith("0")) return "33" + raw.slice(1); // France métropolitaine
+    return raw;
+  };
+
+  const applyBonPatch = (bonId, patch) => {
+    setBons(prev => prev.map(b => b.id === bonId ? { ...b, ...patch } : b));
+    setSelectedBon(prev => (prev && prev.id === bonId) ? { ...prev, ...patch } : prev);
+  };
+
+  const envoyerConfirmation = async (bon) => {
+    const prenom  = bon.clientPrenom || bon.clientNom || "client";
+    const tel     = formatTelWa(bon.clientTel);
+    const adresse = bon.adresseIntervention || bon.clientAdresse || "";
+    const texte = `Bonjour ${prenom},\n\nNous vous confirmons votre rendez-vous avec Cocon+ :\n\n📅 ${fmtDateLong(bon.datePrevue)}\n🕐 ${bon.heurePrevue}\n🔧 ${bon.type}${adresse ? `\n📍 ${adresse}` : ""}\n\nNotre équipe sera présente à l'heure prévue.\nPour toute question : 0596 73 66 66\n\nCocon Plus SARL`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(texte)}`, "_blank");
+    try {
+      await updateDoc(doc(db, "bons", bon.id), { confirmationEnvoyee: true, dateConfirmation: Timestamp.now() });
+      applyBonPatch(bon.id, { confirmationEnvoyee: true });
+    } catch(e) { console.error("Erreur confirmation:", e); }
+  };
+
+  const envoyerRappel = async (bon) => {
+    const prenom  = bon.clientPrenom || bon.clientNom || "client";
+    const tel     = formatTelWa(bon.clientTel);
+    const adresse = bon.adresseIntervention || bon.clientAdresse || "";
+    const texte = `Bonjour ${prenom},\n\nPetit rappel : votre rendez-vous Cocon+ est prévu le ${fmtDateLong(bon.datePrevue)} à ${bon.heurePrevue} pour ${bon.type}.${adresse ? `\n📍 ${adresse}` : ""}\n\nÀ très bientôt,\nCocon Plus SARL`;
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(texte)}`, "_blank");
+    try {
+      await updateDoc(doc(db, "bons", bon.id), { rappelEnvoye: true, dateRappel: Timestamp.now() });
+      applyBonPatch(bon.id, { rappelEnvoye: true });
+    } catch(e) { console.error("Erreur rappel:", e); }
+  };
+
+  // ── WhatsApp (messages groupés planning) ─────────────────────────────────
+
+  const TECH_EMOJIS = { "Dimitri":"🟢", "Georges":"🟠", "Equipe":"🔵" };
+
+  const fmtHeure = (h) => {
+    if (!h) return "?h";
+    const [hh, mm] = h.split(":").map(Number);
+    return mm === 0 ? `${hh}h` : `${hh}h${String(mm).padStart(2,"0")}`;
+  };
+
+  const generateWAMessage = (period, nextWeekBons = []) => {
+    const todayDate = new Date();
+    const tomDate   = new Date(); tomDate.setDate(todayDate.getDate() + 1);
+    const todayStr  = fmtDate(todayDate);
+    const tomStr    = fmtDate(tomDate);
+
+    // Génère toutes les dates entre dateDebut et dateFin incluses
+    const expandDays = (dateDebut, dateFin) => {
+      const days = [];
+      const cur = new Date(dateDebut + "T12:00:00");
+      const end = new Date((dateFin || dateDebut) + "T12:00:00");
+      while (cur <= end) {
+        days.push(fmtDate(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+      return days;
+    };
+
+    // Construit une map jour → [bons] en expandant les multi-jours
+    const buildDayMap = (bonsList, rangeStart, rangeEnd) => {
+      const map = {};
+      bonsList.forEach(b => {
+        const days = expandDays(b.datePrevue, b.dateFinPrevue || b.datePrevue);
+        days.forEach(d => {
+          if (d < rangeStart || d > rangeEnd) return;
+          if (!map[d]) map[d] = [];
+          map[d].push({ ...b, _displayDate: d });
+        });
+      });
+      return map;
+    };
+
+    let header = "";
+    let dayMap  = {};
+    let rangeS  = "";
+    let rangeE  = "";
+    let filteredBons = [];
+
+    if (period === "today") {
+      header = `📅 *Planning Cocon+ · ${todayDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      filteredBons = bons;
+      rangeS = todayStr; rangeE = todayStr;
+    } else if (period === "tomorrow") {
+      header = `📅 *Planning Cocon+ · ${tomDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}*`;
+      filteredBons = bons;
+      rangeS = tomStr; rangeE = tomStr;
+    } else if (period === "next_week") {
+      const nextM   = getMonday(weekOffset + 1);
+      const w2      = getWeekFrom(nextM);
+      rangeS = fmtDate(w2[0]); rangeE = fmtDate(w2[6]);
+      const d1 = w2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const d2 = w2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const nwLabel = weekOffset === 0 ? "semaine prochaine" : weekOffset === -1 ? "semaine en cours" : `semaine du ${d1}`;
+      header = `📅 *Planning Cocon+ · ${nwLabel.charAt(0).toUpperCase()+nwLabel.slice(1)} · ${d1} – ${d2}*`;
+      filteredBons = nextWeekBons;
+    } else {
+      rangeS = rangeStart; rangeE = rangeEnd;
+      const d1 = week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const d2 = week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"long"});
+      const weekLabel = weekOffset === 0 ? "semaine en cours" : weekOffset === 1 ? "semaine prochaine" : weekOffset === -1 ? "semaine dernière" : `semaine du ${d1}`;
+      header = `📅 *Planning Cocon+ · ${weekLabel.charAt(0).toUpperCase()+weekLabel.slice(1)} · ${d1} – ${d2}*`;
+      filteredBons = bons;
+    }
+
+    dayMap = buildDayMap(filteredBons, rangeS, rangeE);
+    const days = Object.keys(dayMap).sort();
+
+    if (days.length === 0) return `${header}\n\nAucune intervention prévue.`;
+
+    const lines = [header, ""];
+    const isMultiPeriod = period === "week" || period === "next_week";
+
+    days.forEach(dateStr => {
+      const dayBons = dayMap[dateStr].sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""));
+
+      if (isMultiPeriod) {
+        const d = new Date(dateStr + "T12:00:00");
+        const dayLabel = d.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});
+        lines.push(`*${dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)}*`);
+      }
+
+      dayBons.forEach(b => {
+        const techEmoji = TECH_EMOJIS[b.techNom] || "⚫";
+        const prefix    = b.isRetouche ? `${techEmoji}🔧` : techEmoji;
+        const estPremierJour = b._displayDate === b.datePrevue;
+        const heure     = estPremierJour ? fmtHeure(b.heurePrevue) : "↪";
+        const heureFin  = estPremierJour && b.heureFinPrevue ? ` → ${fmtHeure(b.heureFinPrevue)}` : "";
+        const client    = b.clientSociete || `${b.clientNom} ${b.clientPrenom||""}`.trim();
+        const ville     = extractVille(b.adresseIntervention||b.clientAdresse||"");
+        const villeStr  = ville ? ` · ${ville}` : "";
+        const jourStr   = b.joursTotal > 1 ? ` (J${b.jourNum}/${b.joursTotal})` : "";
+        lines.push(`${prefix} ${heure}${heureFin} ${client} → ${b.type}${villeStr}${jourStr}`);
+      });
+
+      if (isMultiPeriod) lines.push("");
+    });
+
+    // Résumé — compter les bons uniques (pas les jours expanded)
+    const uniqueBons = [...new Map(filteredBons.filter(b => {
+      const bdays = expandDays(b.datePrevue, b.dateFinPrevue || b.datePrevue);
+      return bdays.some(d => d >= rangeS && d <= rangeE);
+    }).map(b => [b.id, b])).values()];
+    const nbRetouches = uniqueBons.filter(b => b.isRetouche).length;
+    const resumeBase = isMultiPeriod
+      ? `${uniqueBons.length} intervention${uniqueBons.length>1?"s":""} · ${days.length} jour${days.length>1?"s":""}`
+      : `${uniqueBons.length} intervention${uniqueBons.length>1?"s":""}`;
+    const resumeRetouche = nbRetouches > 0 ? ` (dont ${nbRetouches} retouche${nbRetouches>1?"s":""})` : "";
+
+    lines.push("━━━━━━━━━━━━━");
+    lines.push(resumeBase + resumeRetouche);
+    lines.push(`🔗 ${window.location.origin}`);
+    lines.push("");
+    lines.push("*Légende*");
+    lines.push(`${TECH_EMOJIS["Dimitri"]||"🟢"} Dimitri · ${TECH_EMOJIS["Georges"]||"🟠"} Georges · ${TECH_EMOJIS["Equipe"]||"🔵"} Equipe`);
+    lines.push("🔧 Retouche");
+    lines.push("");
+    lines.push("_Cocon+ · 0596 73 66 66_");
+
+    return lines.join("\n");
+  };
+
+  const handleWAPeriod = async (period) => {
+    let nextWeekBons = [];
+    if (period === "next_week") {
+      const nextM   = getMonday(weekOffset + 1);
+      const w2      = getWeekFrom(nextM);
+      const w2start = fmtDate(w2[0]);
+      const w2end   = fmtDate(w2[6]);
+      try {
+        const snap = await getDocs(collection(db,"bons"));
+        const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
+        nextWeekBons = all.filter(b => b.datePrevue >= w2start && b.datePrevue <= w2end);
+      } catch(e) {}
+    }
+    const msg = generateWAMessage(period, nextWeekBons);
+    setWaMessage(msg);
+  };
+
+  const openWhatsApp = async () => {
+    try {
+      await navigator.clipboard.writeText(waMessage);
+      setWaCopied(true);
+      setTimeout(() => setWaCopied(false), 4000);
+    } catch(e) {
+      // Fallback si clipboard non dispo
+      const ta = document.createElement("textarea");
+      ta.value = waMessage;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setWaCopied(true);
+      setTimeout(() => setWaCopied(false), 4000);
+    }
+    window.open("https://web.whatsapp.com", "_blank");
+  };
 
   const selectStyle = {
-    width: "100%",
-    padding: "10px 12px",
-    fontSize: 14,
-    border: "0.5px solid var(--color-border-tertiary)",
-    borderRadius: 8,
-    background: "var(--color-background-primary)",
-    color: "var(--color-text-primary)",
+    width:"100%", padding:"10px 12px", fontSize:14,
+    border:"0.5px solid var(--color-border-tertiary)", borderRadius:8,
+    background:"var(--color-background-primary)", color:"var(--color-text-primary)",
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // VUE : Formulaire création rapide
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── ÉTAPE 1 ───────────────────────────────────────────────────────────────
+  if (formStep === 1) {
+    const joursForm = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
+    const horairesOk = joursForm.length > 0 && joursForm.every(d => form.horaires?.[d]?.debut && form.horaires?.[d]?.fin);
+    const canGoNext = form.datePrevue && form.techNom && form.type && horairesOk;
 
-  if (quickFormDate) {
-    const dateLabel = new Date(quickFormDate + "T12:00:00").toLocaleDateString(
-      "fr-FR",
-      { weekday: "long", day: "numeric", month: "long" }
-    );
-    const canSubmit = form.clientNom && form.type && form.techNom;
+    const updateHoraire = (d, field, value) => {
+      setForm(f => ({ ...f, horaires: { ...f.horaires, [d]: { ...f.horaires?.[d], [field]: value } } }));
+    };
 
     return (
       <div className="container">
         <div className="page-header">
-          <button
-            className="btn-back"
-            onClick={() => {
-              setQuickFormDate(null);
-              setForm({});
-            }}
-          >
-            ← Retour
-          </button>
-          <h2>Nouveau bon</h2>
+          <button className="btn-back" onClick={()=>{ setFormStep(null); setForm({}); }}>← Retour</button>
+          <h2>Nouvelle intervention</h2>
+          <span style={{fontSize:11,color:"var(--color-text-secondary)",background:"var(--color-background-secondary)",padding:"3px 10px",borderRadius:20}}>Étape 1 / 2</span>
         </div>
-
-        <div
-          style={{
-            background: "#35B499",
-            color: "white",
-            borderRadius: 10,
-            padding: "10px 14px",
-            fontSize: 13,
-            fontWeight: 600,
-            marginBottom: 16,
-            textTransform: "capitalize",
-          }}
-        >
-          📅 {dateLabel}
-        </div>
-
         <div className="card">
-          <div className="card-title">Client</div>
-          {[
-            ["clientNom", "Nom *", "text"],
-            ["clientPrenom", "Prénom", "text"],
-            ["clientTel", "Téléphone", "tel"],
-            ["clientEmail", "Email", "email"],
-          ].map(([key, label, type]) => (
-            <div className="field" key={key}>
-              <label>{label}</label>
-              <input
-                type={type}
-                value={form[key] || ""}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, [key]: e.target.value }))
-                }
-              />
+          <div className="card-title">Dates</div>
+          <div className="row2">
+            <div className="field"><label>Date de début *</label>
+              <input type="date" value={form.datePrevue||""} onChange={e=>setForm(f=>{
+                const next = { ...f, datePrevue:e.target.value, dateFinPrevue:f.dateFinPrevue&&f.dateFinPrevue<e.target.value?e.target.value:f.dateFinPrevue };
+                next.horaires = syncHoraires(next);
+                return next;
+              })} />
             </div>
-          ))}
+            <div className="field"><label>Date de fin <span style={{fontSize:10,color:"var(--color-text-secondary)",fontWeight:400}}>(optionnel, si plusieurs jours)</span></label>
+              <input type="date" min={form.datePrevue||""} value={form.dateFinPrevue||""} onChange={e=>setForm(f=>{
+                const next = { ...f, dateFinPrevue:e.target.value };
+                next.horaires = syncHoraires(next);
+                return next;
+              })} />
+            </div>
+          </div>
+          {joursForm.length > 1 && (
+            <p style={{fontSize:11,color:"#35B499",fontWeight:600,marginTop:2}}>
+              📅 {joursForm.length} jours — un bon distinct sera créé pour chaque jour
+            </p>
+          )}
         </div>
 
-        <div className="card">
-          <div className="card-title">Intervention</div>
-
-          <div className="field">
-            <label>Type *</label>
-            <select
-              style={selectStyle}
-              value={form.type || ""}
-              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
-            >
-              <option value="">Choisir un type…</option>
-              {TYPES_INTERVENTION.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Heure prévue</label>
-            <input
-              type="time"
-              value={form.heurePrevue || "08:00"}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, heurePrevue: e.target.value }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label>Collaborateur *</label>
-            <select
-              style={selectStyle}
-              value={form.techNom || ""}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, techNom: e.target.value }))
-              }
-            >
-              <option value="">Choisir…</option>
-              <option value="Equipe">Equipe</option>
-              {techList.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Demande client</label>
-            <textarea
-              value={form.demandeClient || ""}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, demandeClient: e.target.value }))
-              }
-              placeholder="Description de l'intervention…"
-              rows={3}
-            />
-          </div>
-        </div>
-
-        <button
-          className="btn-primary"
-          style={{ width: "100%", opacity: canSubmit ? 1 : 0.4 }}
-          disabled={saving || !canSubmit}
-          onClick={createQuickBon}
-        >
-          {saving ? "Création…" : "✅ Créer le bon"}
-        </button>
-      </div>
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // VUE : Formulaire indisponibilité
-  // ══════════════════════════════════════════════════════════════════════════
-
-  if (indispoFormOpen) {
-    const canSubmit =
-      indispoData.techNom && indispoData.dateDebut && indispoData.dateFin;
-
-    return (
-      <div className="container">
-        <div className="page-header">
-          <button className="btn-back" onClick={() => setIndispoFormOpen(false)}>
-            ← Retour
-          </button>
-          <h2>Indisponibilité</h2>
-        </div>
-
-        <div className="card">
-          <div className="field">
-            <label>Collaborateur *</label>
-            <select
-              style={selectStyle}
-              value={indispoData.techNom}
-              onChange={(e) =>
-                setIndispoData((d) => ({ ...d, techNom: e.target.value }))
-              }
-            >
-              <option value="">Choisir…</option>
-              {techList.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Du *</label>
-            <input
-              type="date"
-              value={indispoData.dateDebut}
-              onChange={(e) =>
-                setIndispoData((d) => ({ ...d, dateDebut: e.target.value }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label>Au *</label>
-            <input
-              type="date"
-              value={indispoData.dateFin}
-              min={indispoData.dateDebut}
-              onChange={(e) =>
-                setIndispoData((d) => ({ ...d, dateFin: e.target.value }))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label>Motif</label>
-            <select
-              style={selectStyle}
-              value={indispoData.motif}
-              onChange={(e) =>
-                setIndispoData((d) => ({ ...d, motif: e.target.value }))
-              }
-            >
-              {["Congé", "Maladie", "Formation", "Autre"].map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Indispos existantes cette semaine */}
-        {indispos.length > 0 && (
+        {joursForm.length > 0 && (
           <div className="card">
-            <div className="card-title">Indisponibilités en cours</div>
-            {indispos.map((i) => (
-              <div
-                key={i.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "10px 0",
-                  borderBottom: "0.5px solid var(--color-border-tertiary)",
-                }}
-              >
-                <div>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "var(--color-text-primary)",
-                      marginBottom: 2,
-                    }}
-                  >
-                    {i.techNom}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {i.motif} · {i.dateDebut}
-                    {i.dateDebut !== i.dateFin ? ` → ${i.dateFin}` : ""}
-                  </p>
+            <div className="card-title">Horaires par jour</div>
+            {joursForm.map((d, i) => (
+              <div key={d} style={{padding:"10px 0",borderBottom:i<joursForm.length-1?"0.5px solid var(--color-border-tertiary)":"none"}}>
+                <p style={{fontSize:12,fontWeight:600,color:"var(--color-text-primary)",marginBottom:6,textTransform:"capitalize"}}>
+                  {joursForm.length > 1 ? `Jour ${i+1} — ` : ""}{fmtDayShort(d)}
+                </p>
+                <div className="row2">
+                  <div className="field" style={{marginBottom:0}}><label>Heure de début *</label>
+                    <input type="time" value={form.horaires?.[d]?.debut||""} onChange={e=>{
+                      updateHoraire(d, "debut", e.target.value);
+                      if (!form.horaires?.[d]?.fin) updateHoraire(d, "fin", defaultHeureFinPrevue(e.target.value));
+                    }} />
+                  </div>
+                  <div className="field" style={{marginBottom:0}}><label>Heure de fin *</label>
+                    <input type="time" value={form.horaires?.[d]?.fin||""} min={form.horaires?.[d]?.debut||""} onChange={e=>updateHoraire(d, "fin", e.target.value)} />
+                  </div>
                 </div>
-                <button
-                  onClick={() => deleteIndispo(i.id)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#e74c3c",
-                    fontSize: 16,
-                    padding: "4px 8px",
-                  }}
-                >
-                  🗑
-                </button>
               </div>
             ))}
           </div>
         )}
 
-        <button
-          className="btn-primary"
-          style={{ width: "100%", opacity: canSubmit ? 1 : 0.4 }}
-          disabled={saving || !canSubmit}
-          onClick={createIndispo}
-        >
-          {saving ? "Enregistrement…" : "Enregistrer"}
+        <div className="card">
+          <div className="card-title">Intervention</div>
+          <div className="field"><label>Collaborateur *</label>
+            <select style={selectStyle} value={form.techNom||""} onChange={e=>setForm(f=>({...f,techNom:e.target.value}))}>
+              <option value="">Choisir…</option>
+              {techList.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Type d'intervention *</label>
+            <select style={selectStyle} value={form.type||""} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+              <option value="">Choisir un type…</option>
+              {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderTop:"0.5px solid var(--color-border-tertiary)",marginTop:4}}>
+            <input type="checkbox" id="planIsRetouche" checked={!!form.isRetouche} onChange={e=>setForm(f=>({...f,isRetouche:e.target.checked}))} style={{width:16,height:16,accentColor:"#E8845C",cursor:"pointer"}}/>
+            <label htmlFor="planIsRetouche" style={{fontSize:13,fontWeight:500,color:"#E8845C",cursor:"pointer"}}>🔧 Retouche (retour sur intervention précédente)</label>
+          </div>
+        </div>
+        <button className="btn-primary" style={{width:"100%",opacity:canGoNext?1:0.4}} disabled={!canGoNext} onClick={()=>setFormStep(2)}>
+          Suivant — Informations client →
         </button>
       </div>
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // VUE : Planning semaine
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── ÉTAPE 2 ───────────────────────────────────────────────────────────────
+  if (formStep === 2) {
+    const canSubmit = form.clientNom && form.adresseIntervention;
+    const joursRecap = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
+    const dateLabel = new Date(form.datePrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={()=>setFormStep(1)}>← Étape 1</button>
+          <h2>Informations client</h2>
+          <span style={{fontSize:11,color:"var(--color-text-secondary)",background:"var(--color-background-secondary)",padding:"3px 10px",borderRadius:20}}>Étape 2 / 2</span>
+        </div>
+        <div className="card readonly" style={{marginBottom:12}}>
+          <div className="card-title">Récapitulatif <span className="locked-badge">🔒 Étape 1</span></div>
+          {joursRecap.length > 1 ? (
+            <>
+              <div className="info-row"><span>Durée</span><b>{joursRecap.length} jours → {joursRecap.length} bons liés (J1…J{joursRecap.length})</b></div>
+              {joursRecap.map((d,i) => (
+                <div className="info-row" key={d}><span style={{textTransform:"capitalize"}}>{fmtDayShort(d)}</span><b>{form.horaires?.[d]?.debut} → {form.horaires?.[d]?.fin}</b></div>
+              ))}
+            </>
+          ) : (
+            <div className="info-row"><span>Date</span><b style={{textTransform:"capitalize"}}>{dateLabel} · {form.horaires?.[form.datePrevue]?.debut} → {form.horaires?.[form.datePrevue]?.fin}</b></div>
+          )}
+          <div className="info-row"><span>Type</span><b>{form.type}</b></div>
+          <div className="info-row"><span>Collaborateur</span><b>{form.techNom}</b></div>
+        </div>
+        <div className="card">
+          <div className="card-title">Client</div>
+          <div className="field"><label>Société (optionnel)</label>
+            <input value={form.clientSociete||""} onChange={e=>setForm(f=>({...f,clientSociete:e.target.value}))} />
+          </div>
+          <div className="row2">
+            <div className="field"><label>Nom *</label><input value={form.clientNom||""} onChange={e=>setForm(f=>({...f,clientNom:e.target.value}))} /></div>
+            <div className="field"><label>Prénom</label><input value={form.clientPrenom||""} onChange={e=>setForm(f=>({...f,clientPrenom:e.target.value}))} /></div>
+          </div>
+          <div className="row2">
+            <div className="field"><label>Téléphone</label><input type="tel" value={form.clientTel||""} onChange={e=>setForm(f=>({...f,clientTel:e.target.value}))} /></div>
+            <div className="field"><label>Email</label><input type="email" value={form.clientEmail||""} onChange={e=>setForm(f=>({...f,clientEmail:e.target.value}))} /></div>
+          </div>
+          <div className="field"><label>Adresse facturation</label>
+            <input value={form.adresseFacturation||""} onChange={e=>setForm(f=>({...f,adresseFacturation:e.target.value}))} />
+          </div>
+          <div className="field"><label>Adresse intervention *</label>
+            <input value={form.adresseIntervention||""} onChange={e=>setForm(f=>({...f,adresseIntervention:e.target.value}))} placeholder="12 rue des Fleurs, 97200 Fort-de-France" />
+          </div>
+          <div className="field"><label>Signataire (si différent)</label>
+            <input value={form.signataire||""} onChange={e=>setForm(f=>({...f,signataire:e.target.value}))} />
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-title">Compléments</div>
+          <div className="row2">
+            <div className="field"><label>N° Devis</label><input value={form.numDevis||""} onChange={e=>setForm(f=>({...f,numDevis:e.target.value}))} placeholder="DEV-2026-001" /></div>
+            <div className="field"><label>N° Visite</label><input value={form.numVisite||"1"} onChange={e=>setForm(f=>({...f,numVisite:e.target.value}))} /></div>
+          </div>
+          <div className="field"><label>Montant facturé (€)</label>
+            <input type="number" step="0.01" value={form.montantFacture||""} onChange={e=>setForm(f=>({...f,montantFacture:e.target.value}))} />
+          </div>
+          <div className="field"><label>Demande client</label>
+            <textarea value={form.demandeClient||""} onChange={e=>setForm(f=>({...f,demandeClient:e.target.value}))} placeholder="Contexte, motif…" rows={3} />
+          </div>
+        </div>
+        <button className="btn-primary" style={{width:"100%",marginBottom:32,opacity:canSubmit?1:0.4}} disabled={saving||!canSubmit} onClick={createBon}>
+          {saving?"Création…":"✅ Créer le bon d'intervention"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── PANNEAU WHATSAPP ──────────────────────────────────────────────────────
+  if (waPanel) {
+    const nextMonday = getMonday(weekOffset + 1);
+    const week2 = getWeekFrom(nextMonday);
+    const weekLabel = weekOffset === 0 ? "Semaine en cours" : weekOffset === 1 ? "Semaine prochaine" : weekOffset === -1 ? "Semaine dernière" : `Sem. du ${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}`;
+    const nextWeekLabel = weekOffset === 0 ? "Semaine prochaine" : weekOffset === -1 ? "Semaine en cours" : `Sem. du ${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}`;
+    const periods = [
+      { key:"today",     label:"Aujourd'hui",   icon:"📅", sub: new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) },
+      { key:"tomorrow",  label:"Demain",         icon:"📆", sub: (() => { const d = new Date(); d.setDate(d.getDate()+1); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}); })() },
+      { key:"week",      label:weekLabel,        icon:"🗓️",  sub: `${week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+      { key:"next_week", label:nextWeekLabel,    icon:"📋", sub: `${week2[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} → ${week2[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}` },
+    ];
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => { setWaPanel(false); setWaMessage(""); }}>← Retour</button>
+          <h2>Envoyer le planning</h2>
+        </div>
+
+        {/* Sélection période */}
+        {!waMessage && (
+          <>
+            <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:16}}>
+              Choisissez la période à partager avec l'équipe :
+            </p>
+            {periods.map(({ key, label, icon, sub }) => (
+              <div key={key} onClick={() => handleWAPeriod(key)}
+                style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:12,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"background .15s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="var(--color-background-secondary)"}
+                onMouseLeave={e=>e.currentTarget.style.background="var(--color-background-primary)"}>
+                <div style={{fontSize:28}}>{icon}</div>
+                <div>
+                  <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)"}}>{label}</div>
+                  <div style={{fontSize:11,color:"var(--color-text-secondary)",textTransform:"capitalize"}}>{sub}</div>
+                </div>
+                <div style={{marginLeft:"auto",fontSize:18,color:"#35B499"}}>→</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Prévisualisation du message */}
+        {waMessage && (
+          <>
+            <div style={{background:"#e9f5e9",border:"0.5px solid #c3e6cb",borderRadius:12,padding:"14px",marginBottom:14,fontFamily:"monospace",fontSize:12,lineHeight:1.7,color:"#1a1a1a",whiteSpace:"pre-wrap",wordBreak:"break-word",maxHeight:360,overflowY:"auto"}}>
+              {waMessage}
+            </div>
+            <button onClick={openWhatsApp}
+              style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+              💬 Copier &amp; Ouvrir WhatsApp
+            </button>
+            {waCopied && (
+              <div style={{background:"#e8f5f3",border:"0.5px solid #35B499",borderRadius:10,padding:"12px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>✅</span>
+                <div>
+                  <p style={{fontSize:13,fontWeight:600,color:"#1a7a65",margin:0}}>Message copié !</p>
+                  <p style={{fontSize:12,color:"#35B499",margin:"2px 0 0"}}>Collez-le dans WhatsApp avec <b>Ctrl+V</b> (ou ⌘+V sur Mac)</p>
+                </div>
+              </div>
+            )}
+            <button className="btn-outline" style={{width:"100%"}} onClick={() => setWaMessage("")}>
+              ← Choisir une autre période
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── PANNEAU BON EXISTANT ──────────────────────────────────────────────────
+  if (selectedBon && !editingBon) {
+    const ville    = extractVille(selectedBon.adresseIntervention||selectedBon.clientAdresse||"");
+    const color    = techColors[selectedBon.techNom] || "#35B499";
+    const termine  = selectedBon.statut === "terminé";
+    const duration = getDurationHours(selectedBon.heurePrevue, selectedBon.heureFinPrevue);
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setSelectedBon(null)}>← Retour</button>
+          <h2>Intervention</h2>
+          <span className="badge" style={{background:selectedBon.statut==="terminé"?"#35B499":selectedBon.statut==="en cours"?"#e8c9b8":"#d4f0ea",color:selectedBon.statut==="terminé"?"white":selectedBon.statut==="en cours"?"#6b4a31":"#1a7a65"}}>
+            {selectedBon.statut}
+          </span>
+          {selectedBon.isRetouche&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#fdebd0",color:"#a04000"}}>🔧 Retouche</span>}
+          {selectedBon.confirmationEnvoyee&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#e1f5ee",color:"#0e6b50"}}>✅ Confirmé</span>}
+          {selectedBon.rappelEnvoye&&<span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"#fff4e6",color:"#8B6A4E"}}>🔔 Rappelé</span>}
+        </div>
+
+        {/* Résumé */}
+        <div className="card" style={{marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:4,borderRadius:2,alignSelf:"stretch",background:color,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--color-text-primary)",marginBottom:2}}>
+                {selectedBon.clientNom} {selectedBon.clientPrenom}
+              </div>
+              {selectedBon.clientSociete && <div style={{fontSize:11,color:"#35B499",fontWeight:600,marginBottom:2}}>{selectedBon.clientSociete}</div>}
+              <div style={{fontSize:12,color:"var(--color-text-secondary)"}}>{selectedBon.type}</div>
+            </div>
+          </div>
+          <div className="info-row"><span>Date</span><b>{selectedBon.datePrevue}{selectedBon.dateFinPrevue && selectedBon.dateFinPrevue !== selectedBon.datePrevue ? ` → ${selectedBon.dateFinPrevue}` : ""}</b></div>
+          <div className="info-row">
+            <span>Créneau</span>
+            <b>{selectedBon.heurePrevue}{selectedBon.heureFinPrevue ? ` → ${selectedBon.heureFinPrevue}` : ""}{selectedBon.heureFinPrevue ? ` (${duration % 1 === 0 ? duration+"h" : duration.toFixed(1)+"h"})` : ""}</b>
+          </div>
+          <div className="info-row"><span>Collaborateur</span><b style={{color}}>{selectedBon.techNom}</b></div>
+          {ville && <div className="info-row"><span>Ville</span><b>📍 {ville}</b></div>}
+          <div className="info-row"><span>Réf.</span><b style={{color:"#35B499",fontSize:11}}>{selectedBon.ref}</b></div>
+          {selectedBon.joursTotal > 1 && (
+            <div className="info-row"><span>Intervention liée</span><b>Jour {selectedBon.jourNum} / {selectedBon.joursTotal} — réf. groupe {selectedBon.refBase}</b></div>
+          )}
+        </div>
+
+        {/* Communication client */}
+        {isAdmin && selectedBon.statut === "planifié" && (
+          <div className="card" style={{marginBottom:12,background:"#f0f9f6",border:"0.5px solid #a0dece"}}>
+            <div className="card-title" style={{color:"#1a7a65"}}>Communication client</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button
+                disabled={!selectedBon.clientTel}
+                onClick={() => envoyerConfirmation(selectedBon)}
+                style={{
+                  flex:1, minWidth:150,
+                  background: selectedBon.confirmationEnvoyee ? "#e1f5ee" : "#25D366",
+                  color: selectedBon.confirmationEnvoyee ? "#0e6b50" : "white",
+                  border: selectedBon.confirmationEnvoyee ? "0.5px solid #a0dece" : "none",
+                  padding:"10px 14px", borderRadius:8,
+                  cursor: selectedBon.clientTel ? "pointer" : "not-allowed",
+                  fontSize:13, fontWeight:600,
+                  opacity: selectedBon.clientTel ? 1 : 0.5,
+                }}>
+                {selectedBon.confirmationEnvoyee ? "✅ Confirmation envoyée" : "📩 Confirmer le RDV"}
+              </button>
+              <button
+                disabled={!selectedBon.clientTel}
+                onClick={() => envoyerRappel(selectedBon)}
+                style={{
+                  flex:1, minWidth:150,
+                  background: selectedBon.rappelEnvoye ? "#fff4e6" : "#25D366",
+                  color: selectedBon.rappelEnvoye ? "#8B6A4E" : "white",
+                  border: selectedBon.rappelEnvoye ? "0.5px solid #e8c9b8" : "none",
+                  padding:"10px 14px", borderRadius:8,
+                  cursor: selectedBon.clientTel ? "pointer" : "not-allowed",
+                  fontSize:13, fontWeight:600,
+                  opacity: selectedBon.clientTel ? 1 : 0.5,
+                }}>
+                {selectedBon.rappelEnvoye ? "🔔 Rappel envoyé" : "🔔 Envoyer rappel"}
+              </button>
+            </div>
+            {!selectedBon.clientTel && (
+              <p style={{fontSize:11,color:"#c0392b",marginTop:8}}>Aucun numéro de téléphone renseigné</p>
+            )}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {!termine && isAdmin && (
+            <button className="btn-primary" onClick={() => setEditingBon({ ...selectedBon })}>
+              ✏️ Modifier le créneau
+            </button>
+          )}
+          {onOpenBon && (
+            <button className="btn-outline" onClick={() => { onOpenBon(selectedBon); setSelectedBon(null); }}>
+              📋 Voir le bon complet
+            </button>
+          )}
+          {termine && (
+            <p style={{fontSize:12,color:"#888",textAlign:"center",fontStyle:"italic"}}>
+              Ce bon est terminé — modification non disponible.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── FORMULAIRE MODIFICATION CRÉNEAU ───────────────────────────────────────
+  if (editingBon) {
+    const canSave = editingBon.datePrevue && editingBon.heurePrevue && editingBon.heureFinPrevue && editingBon.techNom && editingBon.type;
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setEditingBon(null)}>← Retour</button>
+          <h2>Modifier le créneau</h2>
+        </div>
+
+        <div className="card readonly" style={{marginBottom:12}}>
+          <div className="card-title">Bon concerné <span className="locked-badge">🔒 Infos client</span></div>
+          <div className="info-row"><span>Client</span><b>{editingBon.clientNom} {editingBon.clientPrenom}</b></div>
+          <div className="info-row"><span>Réf.</span><b style={{color:"#35B499"}}>{editingBon.ref}</b></div>
+        </div>
+
+        {editingBon.joursTotal > 1 && (
+          <div className="card readonly" style={{marginBottom:12,padding:"10px 14px"}}>
+            <p style={{fontSize:11,color:"#35B499",fontWeight:600,margin:0}}>
+              📅 Jour {editingBon.jourNum} sur {editingBon.joursTotal} de cette intervention (réf. groupe {editingBon.refBase})
+            </p>
+          </div>
+        )}
+        <div className="card">
+          <div className="card-title">Créneau</div>
+          <div className="field"><label>Date *</label>
+            <input type="date"
+              value={editingBon.datePrevue||""}
+              onChange={e=>setEditingBon(b=>({...b,datePrevue:e.target.value}))} />
+          </div>
+          <div className="row2">
+            <div className="field"><label>Heure de début *</label>
+              <input type="time" value={editingBon.heurePrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,heurePrevue:e.target.value,heureFinPrevue:defaultHeureFinPrevue(e.target.value)}))} />
+            </div>
+            <div className="field"><label>Heure de fin *</label>
+              <input type="time" value={editingBon.heureFinPrevue||""} min={editingBon.heurePrevue||""}
+                onChange={e=>setEditingBon(b=>({...b,heureFinPrevue:e.target.value}))} />
+            </div>
+          </div>
+          <div className="field"><label>Collaborateur *</label>
+            <select style={selectStyle} value={editingBon.techNom||""} onChange={e=>setEditingBon(b=>({...b,techNom:e.target.value}))}>
+              <option value="">Choisir…</option>
+              {techList.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Type d'intervention *</label>
+            <select style={selectStyle} value={editingBon.type||""} onChange={e=>setEditingBon(b=>({...b,type:e.target.value}))}>
+              <option value="">Choisir un type…</option>
+              {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <button className="btn-primary" style={{width:"100%",opacity:canSave?1:0.4,marginBottom:10}}
+          disabled={saving||!canSave} onClick={saveEditBon}>
+          {saving?"Sauvegarde…":"✅ Enregistrer les modifications"}
+        </button>
+        <button className="btn-outline" style={{width:"100%"}} onClick={() => setEditingBon(null)}>
+          Annuler
+        </button>
+      </div>
+    );
+  }
+
+  // ── INDISPO FORM ──────────────────────────────────────────────────────────
+  if (indispoFormOpen) {
+    const canSave = indispoData.techNom && indispoData.dateDebut && (indispoData.jourUnique || indispoData.dateFin);
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={()=>setIndispoFormOpen(false)}>← Retour</button>
+          <h2>Indisponibilité</h2>
+        </div>
+        <div className="card">
+          <div className="field"><label>Collaborateur *</label>
+            <select style={selectStyle} value={indispoData.techNom} onChange={e=>setIndispoData(d=>({...d,techNom:e.target.value}))}>
+              <option value="">Choisir…</option>
+              {techList.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          {/* Toggle jour unique */}
+          <div onClick={()=>setIndispoData(d=>({...d,jourUnique:!d.jourUnique,dateFin:""}))}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer",marginBottom:4}}>
+            <div style={{width:44,height:24,borderRadius:12,background:indispoData.jourUnique?"#35B499":"#ddd",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:2,left:indispoData.jourUnique?20:2,width:20,height:20,borderRadius:"50%",background:"white",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:500,color:"var(--color-text-primary)"}}>Jour unique</div>
+              <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>Jour férié, absence ponctuelle</div>
+            </div>
+          </div>
+
+          <div className="field"><label>{indispoData.jourUnique?"Date *":"Du *"}</label>
+            <input type="date" value={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateDebut:e.target.value}))} />
+          </div>
+          {!indispoData.jourUnique && (
+            <div className="field"><label>Au *</label>
+              <input type="date" value={indispoData.dateFin} min={indispoData.dateDebut} onChange={e=>setIndispoData(d=>({...d,dateFin:e.target.value}))} />
+            </div>
+          )}
+          <div className="field"><label>Motif</label>
+            <select style={selectStyle} value={indispoData.motif} onChange={e=>setIndispoData(d=>({...d,motif:e.target.value}))}>
+              {["Congé","Maladie","Formation","Jour férié","Autre"].map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {indispos.length > 0 && (
+          <div className="card">
+            <div className="card-title">Indisponibilités en cours</div>
+            {indispos.map(i=>{
+              const jourUnique = i.dateDebut === i.dateFin;
+              return (
+                <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
+                  <div>
+                    <p style={{fontSize:13,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>{i.techNom}</p>
+                    <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>
+                      {i.motif} · {jourUnique ? i.dateDebut : `${i.dateDebut} → ${i.dateFin}`}
+                      {jourUnique && <span style={{marginLeft:6,fontSize:9,background:"#e8f0fe",color:"#185FA5",padding:"1px 6px",borderRadius:20,fontWeight:600}}>Jour unique</span>}
+                    </p>
+                  </div>
+                  <button onClick={()=>deleteIndispo(i.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:16,padding:"4px 8px"}}>🗑</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button className="btn-primary" style={{width:"100%",opacity:canSave?1:0.4}}
+          disabled={saving||!canSave} onClick={createIndispo}>
+          {saving?"Enregistrement…":"Enregistrer"}
+        </button>
+        {indispoError && (
+          <p style={{color:"#e74c3c",fontSize:12,marginTop:10,padding:"8px 12px",background:"#fdecea",borderRadius:8,lineHeight:1.5}}>
+            ⚠️ {indispoError}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // ── GRILLE (composant interne — positionnement absolu) ────────────────────
+  const WeekGrid = ({ days, label }) => (
+    <div style={{marginBottom:24}}>
+      <div style={{fontSize:11,fontWeight:600,color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"1.2px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+        {label}
+        <span style={{fontSize:10,fontWeight:400,color:"var(--color-text-secondary)"}}>
+          {days[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} – {days[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"})}
+        </span>
+      </div>
+      <div style={{overflowX:"auto",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-primary)"}}>
+        <div style={{minWidth:700}}>
+
+          {/* ── En-tête jours ── */}
+          <div style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`,borderBottom:"0.5px solid var(--color-border-tertiary)",background:"var(--color-background-secondary)"}}>
+            <div style={{width:52}}/>
+            {days.map(day => {
+              const today   = isToday(day);
+              const dateStr = fmtDate(day);
+              const count   = bons.filter(b => { const s = b.datePrevue; const e = b.dateFinPrevue || b.datePrevue; return dateStr >= s && dateStr <= e; }).length;
+              return (
+                <div key={dateStr} style={{padding:"8px 4px",textAlign:"center",borderLeft:"0.5px solid var(--color-border-tertiary)"}}>
+                  <div style={{fontSize:10,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:500,textTransform:"capitalize",marginBottom:3}}>
+                    {day.toLocaleDateString("fr-FR",{weekday:"short"})}
+                  </div>
+                  <div style={{fontSize:16,fontWeight:800,color:today?"white":"var(--color-text-primary)",background:today?"#35B499":"transparent",borderRadius:"50%",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 4px"}}>
+                    {day.getDate()}
+                  </div>
+                  {count > 0 && <div style={{fontSize:9,color:today?"#35B499":"var(--color-text-secondary)",fontWeight:600}}>{count} bon{count>1?"s":""}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Corps : colonne heure + colonnes jours ── */}
+          <div style={{display:"grid",gridTemplateColumns:`52px repeat(7, minmax(90px,1fr))`}}>
+
+            {/* Colonne heures */}
+            <div style={{position:"relative",height:GRID_HEIGHT,borderRight:"0.5px solid var(--color-border-tertiary)"}}>
+              {HOURS.map((hour, i) => (
+                <div key={hour} style={{
+                  position:"absolute", top: i * CELL_HEIGHT,
+                  right:6, fontSize:10, color:"var(--color-text-secondary)",
+                  lineHeight:`${CELL_HEIGHT}px`,
+                }}>
+                  {String(hour).padStart(2,"0")}h
+                </div>
+              ))}
+            </div>
+
+            {/* Colonnes jours */}
+            {days.map(day => {
+              const dateStr = fmtDate(day);
+              const dayBons = bons.filter(b => {
+                const start = b.datePrevue;
+                const end   = b.dateFinPrevue || b.datePrevue;
+                return dateStr >= start && dateStr <= end;
+              });
+              const today   = isToday(day);
+              const indispo = isDayIndispo(dateStr);
+
+              return (
+                <div key={dateStr} style={{
+                  position:"relative", height:GRID_HEIGHT,
+                  borderLeft:"0.5px solid var(--color-border-tertiary)",
+                  background: indispo
+                    ? "repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(0,0,0,0.025) 5px,rgba(0,0,0,0.025) 10px)"
+                    : today ? "rgba(53,180,153,0.03)" : "transparent",
+                }}>
+                  {/* Lignes horizontales par heure (cliquables) */}
+                  {HOURS.map((hour, i) => (
+                    <div key={hour}
+                      onClick={() => handleCellClick(dateStr, hour)}
+                      style={{
+                        position:"absolute", top: i * CELL_HEIGHT, left:0, right:0, height: CELL_HEIGHT,
+                        borderBottom:"0.5px solid var(--color-border-tertiary)",
+                        cursor: isAdmin ? "pointer" : "default",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                      }}>
+                      {isAdmin && !indispo && dayBons.length === 0 && (
+                        <div style={{fontSize:18,color:"#35B499",opacity:0.12,pointerEvents:"none"}}>+</div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Bons positionnés absolument selon heure */}
+                  {dayBons.map(b => {
+                    const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
+                    const color      = techColors[b.techNom]||"#35B499";
+                    const isMultiDay = b.dateFinPrevue && b.dateFinPrevue !== b.datePrevue;
+                    const isFirstDay = b.datePrevue === dateStr;
+                    const topOffset  = isFirstDay ? getTopOffset(b.heurePrevue) : 2;
+                    const duration   = isFirstDay ? getDurationHours(b.heurePrevue, b.heureFinPrevue) : getDurationHours("07:00","18:00");
+                    const blockH     = isFirstDay ? Math.max(28, duration * CELL_HEIGHT - 4) : GRID_HEIGHT - 4;
+
+                    // Calcul jour X/N pour multi-jours (nouveaux bons : champs jourNum/joursTotal ;
+                    // anciens bons multi-jours "à l'ancienne" : calcul via dateFinPrevue en repli)
+                    let dayLabel = null;
+                    if (b.joursTotal > 1) {
+                      dayLabel = `Jour ${b.jourNum}/${b.joursTotal}`;
+                    } else if (isMultiDay) {
+                      const start = new Date(b.datePrevue + "T12:00:00");
+                      const cur   = new Date(dateStr + "T12:00:00");
+                      const end   = new Date(b.dateFinPrevue + "T12:00:00");
+                      const total = Math.round((end - start) / 86400000) + 1;
+                      const idx   = Math.round((cur - start) / 86400000) + 1;
+                      dayLabel = `Jour ${idx}/${total}`;
+                    }
+
+                    return (
+                      <div key={b.id}
+                        onClick={e => handleBonClick(e, b)}
+                        style={{
+                          position:"absolute",
+                          top: topOffset + 2,
+                          left: 3, right: 3,
+                          height: blockH,
+                          background: b.isRetouche ? "#fff4ee" : statutBg(b.statut),
+                          borderLeft:`3px solid ${b.isRetouche ? "#E8845C" : color}`,
+                          borderRadius:"0 6px 6px 0",
+                          padding:"4px 6px",
+                          fontSize:10, lineHeight:1.4,
+                          overflow:"hidden",
+                          cursor:"pointer",
+                          zIndex:2,
+                          transition:"opacity .15s",
+                        }}
+                        onMouseEnter={e=>{e.currentTarget.style.opacity="0.75";}}
+                        onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
+                        <div style={{fontWeight:700,color:"var(--color-text-primary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {isFirstDay ? `${b.heurePrevue}${b.heureFinPrevue?` → ${b.heureFinPrevue}`:""}` : "—"} · {b.clientNom} {b.clientPrenom}
+                        </div>
+                        {b.isRetouche && (
+                          <div style={{fontSize:9,fontWeight:700,color:"#E8845C",marginTop:1}}>🔧 Retouche</div>
+                        )}
+                        {dayLabel && (
+                          <div style={{fontSize:9,fontWeight:700,color:b.isRetouche?"#E8845C":color,marginTop:1}}>{dayLabel}</div>
+                        )}
+                        {blockH > 40 && (
+                          <div style={{color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:9}}>
+                            {b.type}
+                          </div>
+                        )}
+                        {blockH > 55 && ville && (
+                          <div style={{color,fontWeight:600,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            📍 {ville}
+                          </div>
+                        )}
+                        {blockH > 68 && (
+                          <span style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:2}}>
+                            <span style={{fontSize:8,padding:"1px 6px",borderRadius:20,
+                              background:b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#e8c9b8":"#d4f0ea",
+                              color:b.statut==="terminé"?"white":b.statut==="en cours"?"#6b4a31":"#1a7a65",
+                              fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
+                              {b.statut}
+                            </span>
+                            {b.confirmationEnvoyee && <span title="Confirmé" style={{fontSize:9}}>✅</span>}
+                            {b.rappelEnvoye && <span title="Rappelé" style={{fontSize:9}}>🔔</span>}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── VUE PRINCIPALE ────────────────────────────────────────────────────────
+  const isCurrentWeek = weekOffset === 0;
+  const weekLabel = weekOffset === 0 ? "Semaine en cours"
+    : weekOffset === 1 ? "Semaine prochaine"
+    : weekOffset === -1 ? "Semaine dernière"
+    : weekOffset > 0 ? `Dans ${weekOffset} semaines`
+    : `Il y a ${Math.abs(weekOffset)} semaines`;
 
   return (
     <div className="container">
-      {/* ── En-tête ── */}
-      <div className="page-header">
-        <h2>Planning — Semaine en cours</h2>
+      <div className="page-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <h2>Planning</h2>
+        <div style={{display:"flex",gap:8}}>
+          {isAdmin && (
+            <button onClick={() => { setWaPanel(true); setWaMessage(""); }}
+              style={{background:"#25D366",color:"white",border:"none",borderRadius:8,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+              💬 WA
+            </button>
+          )}
+          {isAdmin && (
+            <button className="btn-primary" style={{padding:"9px 18px",fontSize:13}} onClick={handleAddButton}>
+              + Ajouter
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Résumé semaine ── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 8,
-          marginBottom: 16,
-        }}
-      >
+      {/* ── Navigation semaine ── */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:8}}>
+        <button onClick={()=>setWeekOffset(o=>o-1)}
+          style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",color:"var(--color-text-primary)",fontWeight:500}}>
+          ← Précédente
+        </button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--color-text-primary)"}}>{weekLabel}</div>
+          <div style={{fontSize:11,color:"var(--color-text-secondary)"}}>
+            {week1[0].toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} – {week1[6].toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"})}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {!isCurrentWeek && (
+            <button onClick={()=>setWeekOffset(0)}
+              style={{background:"#35B499",color:"white",border:"none",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>
+              Aujourd'hui
+            </button>
+          )}
+          <button onClick={()=>setWeekOffset(o=>o+1)}
+            style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",color:"var(--color-text-primary)",fontWeight:500}}>
+            Suivante →
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
         {[
-          { label: "Total", value: totalWeek, color: "#35B499" },
-          {
-            label: "Terminés",
-            value: totalTermines,
-            color: "#35B499",
-          },
-          {
-            label: "Restants",
-            value: totalWeek - totalTermines,
-            color: "#E8845C",
-          },
-        ].map(({ label, value, color }) => (
-          <div
-            key={label}
-            style={{
-              background: "var(--color-background-secondary)",
-              borderRadius: 10,
-              padding: "10px",
-              textAlign: "center",
-            }}
-          >
-            <p
-              style={{
-                fontSize: 22,
-                fontWeight: 800,
-                color,
-                lineHeight: 1.1,
-              }}
-            >
-              {value}
-            </p>
-            <p
-              style={{ fontSize: 11, color: "var(--color-text-secondary)" }}
-            >
-              {label}
-            </p>
+          {label:"Interventions",val:bons.length,color:"#35B499",fmt:v=>v},
+          {label:"Terminées",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499",fmt:v=>v},
+          {label:"CA prévisionnel",val:bons.reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0),color:"#8B6A4E",fmt:v=>v>0?v.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—"},
+        ].map(({label,val,color,fmt})=>(
+          <div key={label} style={{background:"var(--color-background-secondary)",borderRadius:10,padding:"10px",textAlign:"center"}}>
+            <p style={{fontSize:val>9999?15:20,fontWeight:800,color,lineHeight:1.1}}>{fmt(val)}</p>
+            <p style={{fontSize:10,color:"var(--color-text-secondary)"}}>{label}</p>
           </div>
         ))}
       </div>
 
-      {/* ── Filtre techniciens ── */}
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          overflowX: "auto",
-          paddingBottom: 4,
-          marginBottom: 16,
-          scrollbarWidth: "none",
-        }}
-      >
-        {["tous", ...techList].map((t) => {
-          const active = filterTech === t;
-          const color =
-            t === "tous" ? "#35B499" : techColors[t] || "#35B499";
-          return (
-            <button
-              key={t}
-              onClick={() => setFilterTech(t)}
-              style={{
-                flexShrink: 0,
-                padding: "6px 14px",
-                borderRadius: 20,
-                border: active ? "none" : "0.5px solid var(--color-border-tertiary)",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: active ? 700 : 400,
-                background: active ? color : "var(--color-background-primary)",
-                color: active ? "white" : "var(--color-text-secondary)",
-                transition: "all .15s",
-              }}
-            >
-              {t === "tous" ? "👥 Tous" : t}
-            </button>
-          );
-        })}
+      <div style={{display:"flex",gap:14,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        {Object.entries(techColors).map(([name,color])=>(
+          <div key={name} style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
+            <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>{name}</span>
+          </div>
+        ))}
+        {onOpenBon && (
+          <span style={{fontSize:10,color:"var(--color-text-secondary)",marginLeft:"auto",fontStyle:"italic"}}>
+            Cliquez sur un bon pour l'ouvrir
+          </span>
+        )}
       </div>
 
-      {/* ── Chargement ── */}
-      {loading && (
-        <p
-          style={{
-            textAlign: "center",
-            color: "var(--color-text-secondary)",
-            fontSize: 13,
-            padding: "2rem 0",
-          }}
-        >
-          Chargement…
-        </p>
-      )}
+      {loading && <p style={{textAlign:"center",color:"var(--color-text-secondary)",fontSize:13,padding:"2rem 0"}}>Chargement…</p>}
+      {!loading && <WeekGrid days={week1} label={weekLabel} />}
 
-      {/* ── Jours de la semaine ── */}
-      {!loading &&
-        weekDays.map((day) => {
-          const dayBons = getBonsForDay(day);
-          const dayIndispos = getIndisposForDay(day);
-          const today = isToday(day);
-          const dateStr = fmtDate(day);
-          const isEmpty = dayBons.length === 0 && dayIndispos.length === 0;
-
-          return (
-            <div key={dateStr} style={{ marginBottom: 12 }}>
-              {/* En-tête du jour */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "9px 14px",
-                  borderRadius: 10,
-                  background: today
-                    ? "#35B499"
-                    : "var(--color-background-secondary)",
-                  color: today ? "white" : "var(--color-text-secondary)",
-                  marginBottom: dayBons.length > 0 || dayIndispos.length > 0 ? 6 : 0,
-                }}
-              >
-                <span
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {today ? "📍 " : ""}
-                  {fmtDayLabel(day)}
-                </span>
-
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  {dayBons.length > 0 && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        background: today
-                          ? "rgba(255,255,255,0.25)"
-                          : "var(--color-border-tertiary)",
-                        padding: "2px 8px",
-                        borderRadius: 10,
-                        color: today ? "white" : "var(--color-text-secondary)",
-                      }}
-                    >
-                      {dayBons.length} bon{dayBons.length > 1 ? "s" : ""}
-                    </span>
-                  )}
-                  {isAdmin && (
-                    <button
-                      onClick={() => setQuickFormDate(dateStr)}
-                      style={{
-                        background: today
-                          ? "rgba(255,255,255,0.25)"
-                          : "var(--color-background-primary)",
-                        border: today
-                          ? "none"
-                          : "0.5px solid var(--color-border-tertiary)",
-                        borderRadius: 8,
-                        padding: "4px 10px",
-                        fontSize: 12,
-                        cursor: "pointer",
-                        color: today ? "white" : "var(--color-text-primary)",
-                        fontWeight: 600,
-                      }}
-                    >
-                      + Ajouter
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Indisponibilités */}
-              {dayIndispos.map((i) => (
-                <div
-                  key={i.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    background: "var(--color-background-secondary)",
-                    border: "1px dashed var(--color-border-tertiary)",
-                    marginBottom: 5,
-                    opacity: 0.8,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    🚫{" "}
-                    <b style={{ color: "var(--color-text-primary)" }}>
-                      {i.techNom}
-                    </b>{" "}
-                    — {i.motif}
-                  </span>
-                  {isAdmin && (
-                    <button
-                      onClick={() => deleteIndispo(i.id)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#e74c3c",
-                        fontSize: 14,
-                        padding: "0 4px",
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
-
-              {/* Bons d'intervention */}
-              {dayBons.map((b) => (
-                <div
-                  key={b.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    marginBottom: 5,
-                    background: "var(--color-background-primary)",
-                    border: "0.5px solid var(--color-border-tertiary)",
-                    borderLeft: `4px solid ${
-                      techColors[b.techNom] || "#35B499"
-                    }`,
-                  }}
-                >
-                  {/* Heure */}
-                  <div
-                    style={{
-                      minWidth: 40,
-                      textAlign: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 800,
-                        color: techColors[b.techNom] || "#35B499",
-                      }}
-                    >
-                      {b.heurePrevue || "—"}
-                    </span>
-                  </div>
-
-                  {/* Infos */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text-primary)",
-                        marginBottom: 2,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {b.clientNom} {b.clientPrenom}
-                    </p>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 6,
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        {b.type}
-                      </span>
-                      {filterTech === "tous" && b.techNom && (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: techColors[b.techNom] || "#35B499",
-                            fontWeight: 600,
-                          }}
-                        >
-                          · {b.techNom}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Statut */}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      padding: "3px 8px",
-                      borderRadius: 12,
-                      flexShrink: 0,
-                      background: statutBg(b.statut),
-                      color: statutFg(b.statut),
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.3px",
-                    }}
-                  >
-                    {b.statut}
-                  </span>
-                </div>
-              ))}
-
-              {/* Jour vide — message discret */}
-              {isEmpty && (
-                <div
-                  style={{
-                    padding: "6px 14px",
-                    fontSize: 12,
-                    color: "var(--color-text-secondary)",
-                    fontStyle: "italic",
-                    opacity: 0.6,
-                  }}
-                >
-                  Aucune intervention
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-      {/* ── Bouton indisponibilités (Admin) ── */}
       {isAdmin && !loading && (
-        <div
-          style={{
-            marginTop: 16,
-            paddingTop: 16,
-            borderTop: "0.5px solid var(--color-border-tertiary)",
-          }}
-        >
-          <button
-            className="btn-outline"
-            style={{ width: "100%" }}
-            onClick={() => setIndispoFormOpen(true)}
-          >
+        <div style={{marginTop:8,paddingTop:16,borderTop:"0.5px solid var(--color-border-tertiary)"}}>
+          <button className="btn-outline" style={{width:"100%"}} onClick={()=>setIndispoFormOpen(true)}>
             🚫 Gérer les indisponibilités
           </button>
         </div>
