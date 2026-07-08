@@ -9,6 +9,7 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
+import FacturationModule from "./FacturationModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -321,6 +322,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="facturation") return <div style={{flex:1,overflow:"auto"}}><FacturationModule bons={bons} onOpenBon={(b)=>{setSelected(b);setView("detail");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
