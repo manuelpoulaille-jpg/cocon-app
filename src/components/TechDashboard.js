@@ -97,6 +97,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   const [showSuccess,   setShowSuccess]  = useState(false);
   const [showChecklist, setShowChecklist]= useState(false);
   const [checklist,     setChecklist]    = useState({});
+  const [prestations,   setPrestations]  = useState([]);
+  const [motifOpenId,   setMotifOpenId]  = useState(null);
+  const [motifDraft,    setMotifDraft]   = useState("");
   const canvasRef = useRef(null);
   const drawing   = useRef(false);
 
@@ -137,6 +140,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
     setSigTech(b.signatureTech || null);
     setSigClient(b.signatureClient || null);
     setSignataireNom(b.signataire || b.clientNom + " " + b.clientPrenom);
+    setPrestations((b.prestations || []).map(p => ({ ...p })));
+    setMotifOpenId(null);
+    setMotifDraft("");
     setEmailStatus("");
     setView("bon");
   };
@@ -169,6 +175,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
       signatureTech:sigTech, signatureClient:sigClient,
       geoFin:geo, signataire:signataireNom||selected.signataire||"",
       checklist,
+      prestations,
     };
     await updateDoc(doc(db,"bons",selected.id), bonData);
     const fullBon = { ...selected, ...bonData };
@@ -183,9 +190,54 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
 
   const sauvegarder = async () => {
     setSaving(true);
-    await updateDoc(doc(db,"bons",selected.id), { obsCocon, obsClient, signatureTech:sigTech, signatureClient:sigClient, signataire:signataireNom });
+    await updateDoc(doc(db,"bons",selected.id), { obsCocon, obsClient, signatureTech:sigTech, signatureClient:sigClient, signataire:signataireNom, prestations });
     setSaving(false);
   };
+
+  // ── Prestations (lignes du devis) ──────────────────────────────────────────
+
+  const updatePrestations = (next) => {
+    setPrestations(next);
+    // Sauvegarde immédiate : évite toute perte si le technicien quitte l'écran
+    updateDoc(doc(db,"bons",selected.id), { prestations: next }).catch(e => console.warn("Prestations save error:", e));
+  };
+
+  const togglePrestation = (id) => {
+    if (selected.statut !== "en cours") return;
+    updatePrestations(prestations.map(p =>
+      p.id === id ? { ...p, done: !p.done, nonRealise: false, motif: "" } : p
+    ));
+    if (motifOpenId === id) { setMotifOpenId(null); setMotifDraft(""); }
+  };
+
+  const ouvrirMotif = (p) => {
+    setMotifOpenId(p.id);
+    setMotifDraft(p.motif || "");
+  };
+
+  const validerNonRealise = (id) => {
+    if (!motifDraft.trim()) return;
+    updatePrestations(prestations.map(p =>
+      p.id === id ? { ...p, done: false, nonRealise: true, motif: motifDraft.trim() } : p
+    ));
+    setMotifOpenId(null);
+    setMotifDraft("");
+  };
+
+  const annulerNonRealise = (id) => {
+    updatePrestations(prestations.map(p =>
+      p.id === id ? { ...p, nonRealise: false, motif: "" } : p
+    ));
+  };
+
+  const prestationsOK = prestations.length === 0 ||
+    prestations.every(p => p.done || (p.nonRealise && (p.motif || "").trim()));
+
+  const prestationsTraitees = prestations.filter(p => p.done || (p.nonRealise && (p.motif || "").trim())).length;
+
+  const prestationsResume = (list) => (list || [])
+    .map(p => p.done ? "✓ " + p.label : p.nonRealise ? "✗ " + p.label + " (Non réalisé : " + (p.motif || "—") + ")" : "◻ " + p.label)
+    .join("\n");
 
   // ── Email / Drive ──────────────────────────────────────────────────────────
 
@@ -206,6 +258,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           heureArrivee:f(bon.heureArrivee), heureFin:f(bon.heureFin),
           duree:calcDuree(bon.heureArrivee,bon.heureFin),
           techNom:bon.techNom, obsCocon:bon.obsCocon||"", obsClient:bon.obsClient||"",
+          prestations:prestationsResume(bon.prestations),
         }),
       });
     } catch(e) { console.warn("Drive webhook error:", e); }
@@ -226,6 +279,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
         heure_arrivee:f(bon.heureArrivee), heure_fin:f(bon.heureFin),
         collaborateur:bon.techNom, observations_cocon:bon.obsCocon||"—",
         observations_client:bon.obsClient||"—",
+        prestations_resume:prestationsResume(bon.prestations)||"—",
         signature_tech:bon.signatureTech||"", signature_client:bon.signatureClient||"",
       }, EMAILJS_KEY);
       setEmailStatus("sent");
@@ -388,6 +442,80 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
         </div>
       )}
 
+      {prestations.length > 0 && (
+        <div className="card" style={{border:"1px solid #35B499"}}>
+          <div className="card-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span>📋 Prestations à réaliser</span>
+            <span style={{fontSize:11,fontWeight:600,color:prestationsOK?"#35B499":"#E8845C"}}>
+              {prestationsTraitees}/{prestations.length}
+            </span>
+          </div>
+          <div style={{height:4,background:"var(--color-border-tertiary)",borderRadius:2,marginBottom:"0.8rem"}}>
+            <div style={{height:4,background:"#35B499",borderRadius:2,width:(prestations.length?prestationsTraitees/prestations.length*100:0)+"%",transition:"width .3s"}}/>
+          </div>
+          {selected.statut==="planifié" && (
+            <p style={{fontSize:11,color:"var(--color-text-secondary)",fontStyle:"italic",marginBottom:8}}>
+              Cochez chaque prestation une fois réalisée (disponible après votre arrivée sur le chantier).
+            </p>
+          )}
+          {prestations.map(p => (
+            <div key={p.id} style={{borderBottom:"0.5px solid var(--color-border-tertiary)",padding:"11px 0"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div onClick={() => togglePrestation(p.id)}
+                  style={{width:24,height:24,borderRadius:6,border:p.nonRealise?"2px solid #e74c3c":"2px solid #35B499",background:p.done?"#35B499":p.nonRealise?"#e74c3c":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:selected.statut==="en cours"?"pointer":"default",transition:"all .15s"}}>
+                  {p.done && <span style={{color:"white",fontSize:13,fontWeight:"bold"}}>✓</span>}
+                  {p.nonRealise && <span style={{color:"white",fontSize:13,fontWeight:"bold"}}>✗</span>}
+                </div>
+                <span onClick={() => togglePrestation(p.id)}
+                  style={{fontSize:14,flex:1,cursor:selected.statut==="en cours"?"pointer":"default",color:p.done?"var(--color-text-secondary)":p.nonRealise?"#e74c3c":"var(--color-text-primary)",textDecoration:p.done?"line-through":"none"}}>
+                  {p.label}
+                </span>
+                {selected.statut==="en cours" && !p.done && !p.nonRealise && motifOpenId!==p.id && (
+                  <button onClick={() => ouvrirMotif(p)}
+                    style={{fontSize:10,padding:"4px 8px",borderRadius:6,border:"0.5px solid #e74c3c",background:"transparent",color:"#e74c3c",cursor:"pointer",flexShrink:0,whiteSpace:"nowrap"}}>
+                    Non réalisé
+                  </button>
+                )}
+              </div>
+              {p.nonRealise && motifOpenId!==p.id && (
+                <div style={{marginTop:6,marginLeft:36,padding:"6px 10px",background:"#fdecea",borderRadius:8,display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+                  <span style={{fontSize:12,color:"#c0392b"}}>Motif : {p.motif}</span>
+                  {selected.statut==="en cours" && (
+                    <button onClick={() => annulerNonRealise(p.id)}
+                      style={{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:11,flexShrink:0,textDecoration:"underline",padding:0}}>
+                      Annuler
+                    </button>
+                  )}
+                </div>
+              )}
+              {motifOpenId===p.id && (
+                <div style={{marginTop:8,marginLeft:36}}>
+                  <label style={{fontSize:11,color:"#c0392b",display:"block",marginBottom:4,fontWeight:600}}>Motif de non-réalisation (obligatoire)</label>
+                  <textarea value={motifDraft} onChange={e=>setMotifDraft(e.target.value)} rows={2}
+                    placeholder="Ex : accès bloqué, client absent, matériel manquant…"
+                    style={{width:"100%",padding:"8px 10px",fontSize:13,border:"0.5px solid #e74c3c",borderRadius:8,background:"var(--color-background-primary)",color:"var(--color-text-primary)",boxSizing:"border-box",resize:"vertical"}}/>
+                  <div style={{display:"flex",gap:8,marginTop:6}}>
+                    <button onClick={() => { setMotifOpenId(null); setMotifDraft(""); }}
+                      style={{fontSize:12,padding:"6px 12px",borderRadius:8,border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-secondary)",cursor:"pointer"}}>
+                      Annuler
+                    </button>
+                    <button onClick={() => validerNonRealise(p.id)} disabled={!motifDraft.trim()}
+                      style={{fontSize:12,padding:"6px 12px",borderRadius:8,border:"none",background:"#e74c3c",color:"white",cursor:"pointer",fontWeight:600,opacity:motifDraft.trim()?1:0.4}}>
+                      ✗ Confirmer non réalisé
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {selected.statut==="en cours" && !prestationsOK && (
+            <p style={{fontSize:11,color:"#E8845C",marginTop:10,fontStyle:"italic"}}>
+              Toutes les prestations doivent être cochées (ou marquées non réalisées avec motif) pour clôturer.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <div className="card-title">Suivi</div>
         <div className="info-row"><span>Arrivée réelle</span><b>{fmtTs(selected.heureArrivee)}</b></div>
@@ -459,8 +587,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           {selected.statut==="en cours" && (
             <div>
               {(!sigTech||!sigClient) && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Les deux signatures sont requises pour continuer</p>}
-              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech||!sigClient)?0.4:1}}
-                disabled={!sigTech||!sigClient} onClick={()=>{ sauvegarder(); setShowChecklist(true); }}>
+              {sigTech && sigClient && !prestationsOK && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Il reste des prestations non traitées ({prestationsTraitees}/{prestations.length})</p>}
+              <button className="btn-finish" style={{width:"100%",opacity:(!sigTech||!sigClient||!prestationsOK)?0.4:1}}
+                disabled={!sigTech||!sigClient||!prestationsOK} onClick={()=>{ sauvegarder(); setShowChecklist(true); }}>
                 Valider la checklist →
               </button>
             </div>
@@ -582,6 +711,11 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                   <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>{b.type}</span>
                   {ville && <span style={{fontSize:12,color:"#35B499",fontWeight:600}}>📍 {ville}</span>}
+                  {(b.prestations||[]).length > 0 && (
+                    <span style={{fontSize:11,fontWeight:600,padding:"1px 8px",borderRadius:20,background:"#e1f5ee",color:"#0e6b50"}}>
+                      📋 {b.prestations.filter(p=>p.done||p.nonRealise).length}/{b.prestations.length}
+                    </span>
+                  )}
                 </div>
               </div>
               <div style={{padding:"8px 14px",background:"#fafaf8",borderTop:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>

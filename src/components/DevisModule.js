@@ -34,7 +34,46 @@ const StatutBadge = ({ s }) => {
 const EMPTY_FORM = {
   clientNom:"", clientSociete:"", clientTel:"",
   type:"", source:"Téléphone", numDevis:"", notes:"", statut:"demande",
+  lignes:[],
 };
+
+// ── Éditeur de lignes du devis (deviendront les prestations à cocher du bon) ──
+function LignesEditor({ lignes, onChange }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const l = draft.trim();
+    if (!l) return;
+    onChange([...(lignes||[]), l]);
+    setDraft("");
+  };
+  return (
+    <div>
+      {(lignes||[]).length === 0 && (
+        <p style={{ fontSize:11, color:"#aaa", fontStyle:"italic", margin:"0 0 8px" }}>
+          Chaque ligne deviendra une prestation à cocher par le technicien sur le bon d'intervention.
+        </p>
+      )}
+      {(lignes||[]).map((l, i) => (
+        <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"0.5px solid #f0ede8" }}>
+          <span style={{ fontSize:11, color:"#35B499", fontWeight:700, width:18, flexShrink:0 }}>{i+1}.</span>
+          <input value={l}
+            onChange={e => onChange(lignes.map((x, j) => j===i ? e.target.value : x))}
+            style={{ ...inlineField, flex:1 }}/>
+          <button type="button" onClick={() => onChange(lignes.filter((_, j) => j!==i))}
+            style={{ background:"none", border:"none", cursor:"pointer", color:"#e74c3c", fontSize:15, padding:"2px 6px", flexShrink:0 }}>✕</button>
+        </div>
+      ))}
+      <div style={{ display:"flex", gap:8, marginTop:8 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder="Ex : Traitement des combles…"
+          style={{ ...inlineField, flex:1 }}/>
+        <button type="button" onClick={add} disabled={!draft.trim()}
+          style={{ fontSize:12, padding:"7px 12px", borderRadius:7, border:"none", background:"#35B499", color:"white", cursor:"pointer", fontWeight:600, opacity:draft.trim()?1:0.4, flexShrink:0 }}>＋</button>
+      </div>
+    </div>
+  );
+}
 
 const fieldStyle = {
   width:"100%", padding:"9px 12px", fontSize:13,
@@ -215,6 +254,13 @@ export default function DevisModule({ onPlanifier }) {
         montantFacture:         selected.montant ? parseFloat(selected.montant) : null,
         numVisite:              "1",
         devisId:                selected.id,
+        prestations:            (selected.lignes || []).filter(l => (l||"").trim()).map((label, i) => ({
+          id: "p" + Date.now() + "_" + i,
+          label: label.trim(),
+          done: false,
+          nonRealise: false,
+          motif: "",
+        })),
       };
 
       const bonRef = await addDoc(collection(db, "bons"), bonPayload);
@@ -296,6 +342,11 @@ export default function DevisModule({ onPlanifier }) {
             placeholder="Ce qui a été dit, contexte, urgence…"
             style={{ ...fieldStyle, resize:"vertical" }}/>
         </div>
+      </div>
+
+      <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:14 }}>
+        <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Lignes du devis (prestations)</p>
+        <LignesEditor lignes={form.lignes} onChange={l => setForm(f => ({...f, lignes:l}))}/>
       </div>
 
       <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:14 }}>
@@ -386,6 +437,11 @@ export default function DevisModule({ onPlanifier }) {
           </div>
         </div>
 
+        <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:14 }}>
+          <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Lignes du devis (prestations)</p>
+          <LignesEditor lignes={editForm.lignes} onChange={l => setEditForm(f => ({...f, lignes:l}))}/>
+        </div>
+
         <button onClick={saveEdit} disabled={saving}
           style={{ width:"100%", padding:"13px", borderRadius:10, border:"none", background:"#35B499", color:"white", cursor:"pointer", fontSize:14, fontWeight:700 }}>
           {saving ? "Sauvegarde…" : "Enregistrer"}
@@ -424,7 +480,7 @@ export default function DevisModule({ onPlanifier }) {
           </h2>
           <StatutBadge s={selected.statut}/>
           {/* Modifier */}
-          <button onClick={() => { setEditForm({ clientNom:selected.clientNom||"", clientSociete:selected.clientSociete||"", clientTel:selected.clientTel||"", source:selected.source||"Téléphone", type:selected.type||"", notes:selected.notes||"" }); setEditMode(true); }}
+          <button onClick={() => { setEditForm({ clientNom:selected.clientNom||"", clientSociete:selected.clientSociete||"", clientTel:selected.clientTel||"", source:selected.source||"Téléphone", type:selected.type||"", notes:selected.notes||"", lignes:selected.lignes?[...selected.lignes]:[] }); setEditMode(true); }}
             style={{ padding:"6px 12px", borderRadius:8, border:"0.5px solid #e0ddd8", background:"white", cursor:"pointer", fontSize:12, color:"#555" }}>
             ✏️ Modifier
           </button>
@@ -454,6 +510,17 @@ export default function DevisModule({ onPlanifier }) {
             <div style={{ paddingTop:10, fontSize:13, color:"#555", lineHeight:1.6 }}>
               <span style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>Notes</span>
               {selected.notes}
+            </div>
+          )}
+          {(selected.lignes||[]).length > 0 && (
+            <div style={{ paddingTop:10 }}>
+              <span style={{ fontSize:11, color:"#888", display:"block", marginBottom:6 }}>Lignes du devis ({selected.lignes.length})</span>
+              {selected.lignes.map((l, i) => (
+                <div key={i} style={{ display:"flex", gap:8, alignItems:"baseline", fontSize:13, color:"#1a1a1a", padding:"3px 0" }}>
+                  <span style={{ color:"#35B499", fontWeight:700, fontSize:11, flexShrink:0 }}>{i+1}.</span>
+                  <span>{l}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
