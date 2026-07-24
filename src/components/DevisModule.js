@@ -117,7 +117,7 @@ export default function DevisModule({ onPlanifier }) {
   const [editForm,      setEditForm]      = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [planFormOpen,  setPlanFormOpen]  = useState(false);
-  const [planForm,      setPlanForm]      = useState({ datePrevue:"", heurePrevue:"08:00", techNom:"" });
+  const [planForm,      setPlanForm]      = useState({ datePrevue:"", heurePrevue:"08:00", techNom:"", multiJours:false });
 
   /* ── Fetch ────────────────────────────────────────────────────────────── */
 
@@ -211,7 +211,7 @@ export default function DevisModule({ onPlanifier }) {
     setEditMode(false);
     setConfirmDelete(false);
     setView("detail");
-    setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"" });
+    setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"", multiJours:false });
     setPlanFormOpen(true);
   };
 
@@ -254,6 +254,7 @@ export default function DevisModule({ onPlanifier }) {
         montantFacture:         selected.montant ? parseFloat(selected.montant) : null,
         numVisite:              "1",
         devisId:                selected.id,
+        prestationsNonBloquantes: !!planForm.multiJours,
         prestations:            (selected.lignes || []).filter(l => (l||"").trim()).map((label, i) => ({
           id: "p" + Date.now() + "_" + i,
           label: label.trim(),
@@ -619,7 +620,7 @@ export default function DevisModule({ onPlanifier }) {
           )}
           {selected.statut === "validé" && !planFormOpen && (
             <>
-              <button onClick={() => { setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"" }); setPlanFormOpen(true); }} style={{
+              <button onClick={() => { setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"", multiJours:false }); setPlanFormOpen(true); }} style={{
                 flex:1, padding:"11px", borderRadius:9, border:"none",
                 background:"#35B499", color:"white", cursor:"pointer", fontSize:13, fontWeight:700,
               }}>
@@ -664,6 +665,18 @@ export default function DevisModule({ onPlanifier }) {
                   </select>
                 </div>
               </div>
+              {(selected.lignes||[]).length > 0 && (
+                <div onClick={() => setPlanForm(f => ({...f, multiJours:!f.multiJours}))}
+                  style={{ display:"flex", alignItems:"flex-start", gap:10, margin:"0 0 12px", padding:"10px 12px", borderRadius:8, cursor:"pointer", background:planForm.multiJours?"#fff8f0":"#fafaf8", border:planForm.multiJours?"0.5px solid #e8c9b8":"0.5px solid #e0ddd8" }}>
+                  <div style={{ width:18, height:18, borderRadius:5, border:"2px solid #8B6A4E", background:planForm.multiJours?"#8B6A4E":"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
+                    {planForm.multiJours && <span style={{ color:"white", fontSize:11, fontWeight:"bold" }}>✓</span>}
+                  </div>
+                  <div>
+                    <p style={{ fontSize:12, fontWeight:600, color:"#6b4a31", margin:0 }}>⏳ Chantier sur plusieurs jours — clôture non bloquée</p>
+                    <p style={{ fontSize:11, color:"#888", margin:"2px 0 0" }}>Le technicien pourra clôturer ce bon même si des lignes du devis restent à faire.</p>
+                  </div>
+                </div>
+              )}
               {!selected.adresseIntervention && (
                 <p style={{ fontSize:11, color:"#c0392b", margin:"0 0 10px" }}>
                   ⚠️ Aucune adresse d'intervention renseignée ci-dessus — le bon sera créé sans adresse.

@@ -9,6 +9,7 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
+import DevisModule from "./DevisModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
@@ -19,13 +20,13 @@ const EMPTY_FORM = {
   clientSociete:"",clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
-  prestations:[],
+  prestations:[],prestationsNonBloquantes:false,
 };
 
 // ── Prestations (lignes du devis à cocher par le technicien) ──────────────────
 const newPrestation=(label)=>({id:"p"+Date.now()+"_"+Math.random().toString(36).slice(2,7),label,done:false,nonRealise:false,motif:""});
 
-function PrestationsEditor({ prestations, onChange }) {
+function PrestationsEditor({ prestations, onChange, nonBloquant, onNonBloquantChange }) {
   const [draft,setDraft]=React.useState("");
   const add=()=>{
     const label=draft.trim();
@@ -56,6 +57,18 @@ function PrestationsEditor({ prestations, onChange }) {
         <button type="button" onClick={add} disabled={!draft.trim()}
           style={{fontSize:12,padding:"8px 14px",borderRadius:7,border:"none",background:"#35B499",color:"white",cursor:"pointer",fontWeight:600,opacity:draft.trim()?1:0.4,flexShrink:0}}>＋ Ajouter</button>
       </div>
+      {(prestations||[]).length>0&&onNonBloquantChange&&(
+        <div onClick={()=>onNonBloquantChange(!nonBloquant)}
+          style={{display:"flex",alignItems:"flex-start",gap:10,marginTop:14,padding:"10px 12px",borderRadius:8,cursor:"pointer",background:nonBloquant?"#fff8f0":"#fafaf8",border:nonBloquant?"0.5px solid #e8c9b8":"0.5px solid #e0ddd8"}}>
+          <div style={{width:18,height:18,borderRadius:5,border:"2px solid #8B6A4E",background:nonBloquant?"#8B6A4E":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+            {nonBloquant&&<span style={{color:"white",fontSize:11,fontWeight:"bold"}}>✓</span>}
+          </div>
+          <div>
+            <p style={{fontSize:12,fontWeight:600,color:"#6b4a31",margin:0}}>⏳ Chantier sur plusieurs jours — clôture non bloquée</p>
+            <p style={{fontSize:11,color:"#888",margin:"2px 0 0"}}>Le technicien pourra clôturer ce bon même si des prestations restent à faire (elles seront reportées aux jours suivants). Sans cette case, toutes les lignes doivent être cochées ou justifiées.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -170,6 +183,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [form,setForm]=useState({...EMPTY_FORM});
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
+  const [devis,setDevis]=useState([]);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
@@ -177,7 +191,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const id="ca-scoped-styles";
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
-  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
+  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();fetchDevisHome();},[]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
@@ -193,6 +207,14 @@ export default function AdminDashboard({ user, onLogout }) {
       const snap = await getDocs(collection(db, "contrats"));
       const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setContrats(all);
+    } catch(e) {}
+  };
+
+  const fetchDevisHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "devis"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setDevis(all);
     } catch(e) {}
   };
 
@@ -218,6 +240,7 @@ export default function AdminDashboard({ user, onLogout }) {
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
         numVisite:form.numVisite||"1",
         prestations:(form.prestations||[]).filter(p=>p.label.trim()),
+        prestationsNonBloquantes:!!form.prestationsNonBloquantes,
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
@@ -253,8 +276,9 @@ export default function AdminDashboard({ user, onLogout }) {
       datePrevue:editForm.datePrevue,heurePrevue:editForm.heurePrevue,techNom:editForm.techId,
       types:editForm.types,type:editForm.types.join(", "),
       prestations:(editForm.prestations||[]).filter(p=>p.label.trim()),
+      prestationsNonBloquantes:!!editForm.prestationsNonBloquantes,
     });
-    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", "),prestations:(editForm.prestations||[]).filter(p=>p.label.trim())});
+    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", "),prestations:(editForm.prestations||[]).filter(p=>p.label.trim()),prestationsNonBloquantes:!!editForm.prestationsNonBloquantes});
     setEditMode(false);fetchBons();setSaving(false);
   };
 
@@ -304,14 +328,16 @@ export default function AdminDashboard({ user, onLogout }) {
       });
       const nbOk=bon.prestations.filter(pr=>pr.done).length;
       p.setFontSize(9);p.setTextColor(53,180,153);
-      p.text(nbOk+"/"+bon.prestations.length+" prestation(s) réalisée(s)",ml,y);
+      p.text(nbOk+"/"+bon.prestations.length+" prestation(s) réalisée(s)"+(bon.prestationsNonBloquantes&&nbOk<bon.prestations.length?" — chantier multi-jours, solde reporté":""),ml,y);
       p.setFontSize(10);p.setTextColor(60,60,60);y+=7;
     }
     sec("INTERVENTION");row("Type",bon.type);row("Prévu le",bon.datePrevue+" à "+bon.heurePrevue);
     row("Arrivée réelle",fmt(bon.heureArrivee));row("Fin intervention",fmt(bon.heureFin));row("Durée",calcDuree(bon.heureArrivee,bon.heureFin));
     if(bon.geoArrivee)row("Position arrivée",`Lat:${bon.geoArrivee.lat?.toFixed(5)},Lng:${bon.geoArrivee.lng?.toFixed(5)}`);y+=2;
+    if(y>235){p.addPage();y=20;}
     sec("COMPTE RENDU");const oC=p.splitTextToSize("Cocon+ : "+(bon.obsCocon||"—"),175);p.text(oC,ml,y);y+=oC.length*5+3;
     const oCl=p.splitTextToSize("Client : "+(bon.obsClient||"—"),175);p.text(oCl,ml,y);y+=oCl.length*5+5;
+    if(y>235){p.addPage();y=20;}
     sec("SIGNATURES");p.setFontSize(9);p.text("Collaborateur",ml,y);p.text("Client",ml+90,y);y+=3;
     if(bon.signatureTech){try{p.addImage(bon.signatureTech,"PNG",ml,y,80,30);}catch(e){}}else{p.setDrawColor(200,200,200);p.rect(ml,y,80,30);}
     if(bon.signatureClient){try{p.addImage(bon.signatureClient,"PNG",ml+90,y,80,30);}catch(e){}}else{p.setDrawColor(200,200,200);p.rect(ml+90,y,80,30);}
@@ -378,6 +404,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="devis") return <div style={{flex:1,overflow:"auto"}}><DevisModule onPlanifier={()=>{fetchBons();fetchDevisHome();flashMsg("✅ Bon d'intervention créé depuis le devis !");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -404,7 +431,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="card" style={{marginBottom:16}}><div className="card-title">Demande client</div><div className="field"><textarea value={form.demandeClient} onChange={e=>setForm({...form,demandeClient:e.target.value})} placeholder="Contexte, motif…"/></div></div>
           <div className="card" style={{marginBottom:16}}>
             <div className="card-title">Prestations prévues (lignes du devis)</div>
-            <PrestationsEditor prestations={form.prestations} onChange={p=>setForm(f=>({...f,prestations:p}))}/>
+            <PrestationsEditor prestations={form.prestations} onChange={p=>setForm(f=>({...f,prestations:p}))} nonBloquant={form.prestationsNonBloquantes} onNonBloquantChange={v=>setForm(f=>({...f,prestationsNonBloquantes:v}))}/>
           </div>
           <div className="card" style={{marginBottom:16}}>
             <div className="card-title">Type(s) d'intervention</div>
@@ -435,7 +462,7 @@ export default function AdminDashboard({ user, onLogout }) {
         </div>
         <div className="card" style={{marginBottom:16}}>
           <div className="card-title">Prestations prévues (lignes du devis)</div>
-          <PrestationsEditor prestations={editForm.prestations} onChange={p=>setEditForm(f=>({...f,prestations:p}))}/>
+          <PrestationsEditor prestations={editForm.prestations} onChange={p=>setEditForm(f=>({...f,prestations:p}))} nonBloquant={editForm.prestationsNonBloquantes} onNonBloquantChange={v=>setEditForm(f=>({...f,prestationsNonBloquantes:v}))}/>
         </div>
         <div className="card" style={{marginBottom:16}}><div className="card-title">Types d'intervention</div><div className="types-grid">{TYPES.map(t=><button key={t} type="button" className={"type-btn"+(editForm.types.includes(t)?" active":"")} onClick={()=>setEditForm(f=>({...f,types:f.types.includes(t)?f.types.filter(x=>x!==t):[...f.types,t]}))}>{editForm.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>
         <button className="btn-primary" style={{width:"100%",marginBottom:32}} disabled={saving} onClick={saveEdit}>{saving?"Sauvegarde…":"Enregistrer"}</button>
@@ -449,7 +476,7 @@ export default function AdminDashboard({ user, onLogout }) {
           <button onClick={()=>{setView("list");setSelected(null);setConfirmDelete(false);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
           <h2 style={{margin:0,fontSize:16,fontWeight:600}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
-          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[],prestations:(selected.prestations||[]).map(p=>({...p}))});setEditMode(true);}}>Modifier</button>)}
+          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[],prestations:(selected.prestations||[]).map(p=>({...p})),prestationsNonBloquantes:!!selected.prestationsNonBloquantes});setEditMode(true);}}>Modifier</button>)}
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
         <div className="card" style={{marginBottom:12}}>
@@ -475,7 +502,7 @@ export default function AdminDashboard({ user, onLogout }) {
         {(selected.prestations||[]).length>0&&(
           <div className="card" style={{marginBottom:12}}>
             <div className="card-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <span>📋 Prestations ({selected.prestations.filter(p=>p.done).length}/{selected.prestations.length} réalisées)</span>
+              <span>📋 Prestations ({selected.prestations.filter(p=>p.done).length}/{selected.prestations.length} réalisées){selected.prestationsNonBloquantes&&<span style={{fontSize:10,fontWeight:600,color:"#8B6A4E",background:"#f5e8d8",padding:"2px 8px",borderRadius:20,marginLeft:8}}>⏳ Multi-jours</span>}</span>
               {selected.prestations.some(p=>p.nonRealise)&&<span style={{fontSize:11,fontWeight:600,color:"#c0392b"}}>⚠️ {selected.prestations.filter(p=>p.nonRealise).length} non réalisée{selected.prestations.filter(p=>p.nonRealise).length>1?"s":""}</span>}
             </div>
             {selected.prestations.map((p,i)=>(
@@ -723,7 +750,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",devis:"Devis",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -732,6 +759,7 @@ export default function AdminDashboard({ user, onLogout }) {
         <div className="ca-nav">
           <div className="ca-nav-sec">Pilotage</div>
           <button className={`ca-nav-item${view==="dashboard"?" active":""}`} onClick={()=>setView("dashboard")}>{view==="dashboard"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Tableau de bord</button>
+          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5c35b4"}}/> Devis{devis.filter(d=>d.statut==="demande"||d.statut==="validé").length>0&&<span className="ca-nav-badge" style={{background:"#5c35b4"}}>{devis.filter(d=>d.statut==="demande"||d.statut==="validé").length}</span>}</button>
           <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>navigate("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
