@@ -87,11 +87,11 @@ const inlineField = {
   background:"white", color:"#1a1a1a", boxSizing:"border-box",
 };
 
-const envoieWA = (d) => {
+const buildMessageWA = (d) => {
   const date = d.createdAt?.toDate
     ? d.createdAt.toDate().toLocaleDateString("fr-FR")
     : new Date().toLocaleDateString("fr-FR");
-  const msg = [
+  return [
     "🌿 *Nouvelle demande de devis*",
     "",
     `👤 ${[d.clientSociete, d.clientNom].filter(Boolean).join(" — ")}`,
@@ -102,7 +102,6 @@ const envoieWA = (d) => {
     "",
     `Reçu le ${date}`,
   ].filter(l => l !== null).join("\n");
-  window.open(`https://web.whatsapp.com/send?text=${encodeURIComponent(msg)}`, "_blank");
 };
 
 export default function DevisModule({ onPlanifier }) {
@@ -118,6 +117,26 @@ export default function DevisModule({ onPlanifier }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [planFormOpen,  setPlanFormOpen]  = useState(false);
   const [planForm,      setPlanForm]      = useState({ datePrevue:"", heurePrevue:"08:00", techNom:"", multiJours:false });
+  const [copiedId,      setCopiedId]      = useState(null);
+
+  const copierMessageWA = async (d) => {
+    const msg = buildMessageWA(d);
+    try {
+      await navigator.clipboard.writeText(msg);
+    } catch (e) {
+      // Fallback si l'API clipboard n'est pas disponible (contexte non sécurisé, vieux navigateur…)
+      const ta = document.createElement("textarea");
+      ta.value = msg;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch (e2) {}
+      document.body.removeChild(ta);
+    }
+    setCopiedId(d.id);
+    setTimeout(() => setCopiedId(id => id === d.id ? null : id), 2000);
+  };
 
   /* ── Fetch ────────────────────────────────────────────────────────────── */
 
@@ -603,12 +622,14 @@ export default function DevisModule({ onPlanifier }) {
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {selected.statut === "demande" && (
             <>
-              <button onClick={() => envoieWA(selected)} style={{
+              <button onClick={() => copierMessageWA(selected)} style={{
                 flex:1, padding:"11px", borderRadius:9,
-                border:"0.5px solid #a0d8b0", background:"#e8f9ee",
-                color:"#1a7a45", cursor:"pointer", fontSize:13, fontWeight:700,
+                border: copiedId === selected.id ? "0.5px solid #35B499" : "0.5px solid #a0d8b0",
+                background: copiedId === selected.id ? "#35B499" : "#e8f9ee",
+                color: copiedId === selected.id ? "white" : "#1a7a45",
+                cursor:"pointer", fontSize:13, fontWeight:700, transition:"all .15s",
               }}>
-                📲 Envoyer au responsable
+                {copiedId === selected.id ? "✅ Message copié !" : "📋 Copier le message"}
               </button>
               <button onClick={() => valider(selected)} style={{
                 flex:1, padding:"11px", borderRadius:9, border:"none",
@@ -828,11 +849,13 @@ export default function DevisModule({ onPlanifier }) {
                     <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}
                       onClick={e => e.stopPropagation()}>
                       {d.statut === "demande" && (
-                        <button onClick={() => envoieWA(d)} style={{
+                        <button onClick={() => copierMessageWA(d)} style={{
                           fontSize:10, padding:"4px 9px", borderRadius:6,
-                          border:"0.5px solid #a0d8b0", background:"#e8f9ee",
-                          color:"#1a7a45", cursor:"pointer", fontWeight:600,
-                        }}>📲 WA</button>
+                          border: copiedId === d.id ? "0.5px solid #35B499" : "0.5px solid #a0d8b0",
+                          background: copiedId === d.id ? "#35B499" : "#e8f9ee",
+                          color: copiedId === d.id ? "white" : "#1a7a45",
+                          cursor:"pointer", fontWeight:600, transition:"all .15s",
+                        }}>{copiedId === d.id ? "✅ Copié" : "📋 Copier"}</button>
                       )}
                       {d.statut === "validé" && (
                         <button onClick={() => startPlanification(d)} style={{
