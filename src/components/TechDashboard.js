@@ -14,6 +14,17 @@ const DRIVE_WEBHOOK    = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlY
 const fmtTs = (ts) => ts ? new Date(ts.toDate ? ts.toDate() : ts).toLocaleString("fr-FR") : "—";
 const todayStr = () => new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
 
+const tomorrowStr = () => {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Martinique" }));
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("fr-CA");
+};
+
+const fmtDateCourt = (dateStr) =>
+  dateStr
+    ? new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
+    : "—";
+
 const extractVille = (adresse) => {
   if (!adresse) return "";
   const match = adresse.match(/972\d{2}\s+([^,\n]+)/i);
@@ -113,11 +124,12 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
 
   const fetchBons = async () => {
     const td   = todayStr();
+    const tm   = tomorrowStr();
     const snap = await getDocs(collection(db,"bons"));
     const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
     setBons(
-      all.filter(b => b.datePrevue === td && (b.techId === user.uid || b.techNom === "Equipe"))
-         .sort((a,b) => (a.heurePrevue||"").localeCompare(b.heurePrevue||""))
+      all.filter(b => (b.datePrevue === td || b.datePrevue === tm) && (b.techId === user.uid || b.techNom === "Equipe"))
+         .sort((a,b) => (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||"")))
     );
   };
 
@@ -132,6 +144,10 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   };
 
   // ── Bon actions ────────────────────────────────────────────────────────────
+
+  // Un chantier ne peut être démarré que le jour même de l'intervention.
+  // Les bons du lendemain sont consultables (préparation) mais verrouillés.
+  const estJourJ = (b) => !!b && b.datePrevue === todayStr();
 
   const openBon = (b) => {
     setSelected(b);
@@ -157,6 +173,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   });
 
   const arriver = async () => {
+    if (!estJourJ(selected)) return;   // sécurité : pas de démarrage avant le jour J
     setSaving(true);
     const geo = await getGeoLocation();
     const now = Timestamp.now();
@@ -230,7 +247,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
     ));
   };
 
-  const prestationsOK = prestations.length === 0 ||
+  const prestationsNonBloquantes = !!selected?.prestationsNonBloquantes;
+
+  const prestationsOK = prestationsNonBloquantes || prestations.length === 0 ||
     prestations.every(p => p.done || (p.nonRealise && (p.motif || "").trim()));
 
   const prestationsTraitees = prestations.filter(p => p.done || (p.nonRealise && (p.motif || "").trim())).length;
@@ -411,6 +430,18 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
         <span className="badge" style={{background:statutColor(selected.statut),color:statutText(selected.statut)}}>{selected.statut}</span>
       </div>
 
+      {!estJourJ(selected) && selected.statut==="planifié" && (
+        <div style={{background:"#f5e8d8",border:"0.5px solid #e8c9b8",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
+          <p style={{fontSize:13,fontWeight:600,color:"#6b4a31",margin:0}}>🔒 Consultation — intervention de demain</p>
+          <p style={{fontSize:11,color:"#8B6A4E",margin:"3px 0 0",textTransform:"capitalize"}}>
+            {fmtDateCourt(selected.datePrevue)} à {selected.heurePrevue}
+          </p>
+          <p style={{fontSize:11,color:"#8B6A4E",margin:"4px 0 0"}}>
+            Vous pouvez préparer votre venue (adresse, prestations, demande client). Le chantier sera démarrable le jour même.
+          </p>
+        </div>
+      )}
+
       <div className="card readonly">
         <div className="card-title">Client <span className="locked-badge">🔒 Admin</span></div>
         <div className="info-row"><span>Nom</span><b>{selected.clientNom} {selected.clientPrenom}</b></div>
@@ -445,7 +476,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
       {prestations.length > 0 && (
         <div className="card" style={{border:"1px solid #35B499"}}>
           <div className="card-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <span>📋 Prestations à réaliser</span>
+            <span>📋 Prestations à réaliser{prestationsNonBloquantes && <span style={{fontSize:10,fontWeight:600,color:"#8B6A4E",background:"#f5e8d8",padding:"2px 8px",borderRadius:20,marginLeft:8}}>⏳ Multi-jours</span>}</span>
             <span style={{fontSize:11,fontWeight:600,color:prestationsOK?"#35B499":"#E8845C"}}>
               {prestationsTraitees}/{prestations.length}
             </span>
@@ -455,7 +486,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           </div>
           {selected.statut==="planifié" && (
             <p style={{fontSize:11,color:"var(--color-text-secondary)",fontStyle:"italic",marginBottom:8}}>
-              Cochez chaque prestation une fois réalisée (disponible après votre arrivée sur le chantier).
+              {estJourJ(selected)
+                ? "Cochez chaque prestation une fois réalisée (disponible après votre arrivée sur le chantier)."
+                : "Aperçu des prestations prévues — le pointage sera possible le jour de l'intervention."}
             </p>
           )}
           {prestations.map(p => (
@@ -513,6 +546,11 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
               Toutes les prestations doivent être cochées (ou marquées non réalisées avec motif) pour clôturer.
             </p>
           )}
+          {selected.statut==="en cours" && prestationsNonBloquantes && prestationsTraitees < prestations.length && (
+            <p style={{fontSize:11,color:"#8B6A4E",marginTop:10,fontStyle:"italic"}}>
+              ⏳ Chantier sur plusieurs jours : vous pouvez clôturer ce bon même si des prestations restent à faire — elles seront reprises les jours suivants.
+            </p>
+          )}
         </div>
       )}
 
@@ -527,9 +565,18 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
         )}
         <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-          {selected.statut==="planifié" && (
+          {selected.statut==="planifié" && (estJourJ(selected) ? (
             <button className="btn-arrive" disabled={saving} onClick={arriver}>📍 Arrivé sur le chantier</button>
-          )}
+          ) : (
+            <div style={{width:"100%"}}>
+              <button className="btn-arrive" disabled style={{opacity:0.35,cursor:"not-allowed",width:"100%"}}>
+                🔒 Arrivé sur le chantier
+              </button>
+              <p style={{fontSize:11,color:"var(--color-text-secondary)",fontStyle:"italic",marginTop:6,textAlign:"center"}}>
+                Disponible le jour de l'intervention.
+              </p>
+            </div>
+          ))}
           {selected.statut==="terminé" && selected.emailEnvoye && (
             <p style={{color:"#35B499",fontSize:13,marginTop:4}}>✅ Email envoyé au client</p>
           )}
@@ -676,57 +723,86 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   // VUE : Liste interventions du jour
   // ══════════════════════════════════════════════════════════════════════════
 
+  const bonsJour   = bons.filter(b => b.datePrevue === todayStr());
+  const bonsDemain = bons.filter(b => b.datePrevue === tomorrowStr());
+
+  const BonCard = ({ b, futur }) => {
+    const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
+    return (
+      <div onClick={() => openBon(b)}
+        style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",marginBottom:10,overflow:"hidden",cursor:"pointer",opacity:futur?0.88:1}}>
+        <div style={{padding:"10px 14px",borderBottom:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{fontSize:11,fontWeight:600,color:"#35B499"}}>{b.ref}</span>
+          <span style={{fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut)}}>{b.statut}</span>
+        </div>
+        <div style={{padding:"10px 14px"}}>
+          <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)",marginBottom:4}}>{b.clientNom} {b.clientPrenom}</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>{b.type}</span>
+            {ville && <span style={{fontSize:12,color:"#35B499",fontWeight:600}}>📍 {ville}</span>}
+            {(b.prestations||[]).length > 0 && (
+              <span style={{fontSize:11,fontWeight:600,padding:"1px 8px",borderRadius:20,background:"#e1f5ee",color:"#0e6b50"}}>
+                📋 {b.prestations.filter(p=>p.done||p.nonRealise).length}/{b.prestations.length}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{padding:"8px 14px",background:futur?"#faf7f2":"#fafaf8",borderTop:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Prévu à {b.heurePrevue}</span>
+          {futur
+            ? <span style={{fontSize:11,color:"#8B6A4E",fontWeight:600}}>🔒 Consulter →</span>
+            : <>
+                {b.statut==="planifié" && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>}
+                {b.statut==="en cours" && <span style={{fontSize:11,color:"#E8845C",fontWeight:600}}>Clôturer →</span>}
+                {b.statut==="terminé"  && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>✓ Terminé</span>}
+              </>}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionTitle = ({ children, count }) => (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"4px 0 8px"}}>
+      <span style={{fontSize:10,fontWeight:600,color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"1.2px"}}>{children}</span>
+      {count !== undefined && <span style={{fontSize:10,color:"var(--color-text-secondary)"}}>{count} bon{count>1?"s":""}</span>}
+    </div>
+  );
+
   return (
     <div className="container">
       <div style={{marginBottom:14}}>
-        <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mes interventions du jour</h2>
+        <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mes interventions</h2>
         <p style={{fontSize:11,color:"var(--color-text-secondary)",textTransform:"capitalize"}}>
           {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
         </p>
       </div>
 
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-        <KPI label="Aujourd'hui" value={bons.length}                              color="#35B499"/>
-        <KPI label="En cours"   value={bons.filter(b=>b.statut==="en cours").length} color="#E8845C"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+        <KPI label="Aujourd'hui" value={bonsJour.length}                                  color="#35B499"/>
+        <KPI label="En cours"    value={bonsJour.filter(b=>b.statut==="en cours").length}  color="#E8845C"/>
+        <KPI label="Demain"      value={bonsDemain.length}                                color="#8B6A4E"/>
       </div>
 
-      {/* Liste */}
-      {bons.length === 0 ? (
-        <div style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",padding:"2rem",textAlign:"center",color:"var(--color-text-secondary)",fontSize:13}}>
+      {/* ── Aujourd'hui ── */}
+      <SectionTitle count={bonsJour.length || undefined}>Aujourd'hui</SectionTitle>
+      {bonsJour.length === 0 ? (
+        <div style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",padding:"1.5rem",textAlign:"center",color:"var(--color-text-secondary)",fontSize:13,marginBottom:16}}>
           Aucun bon assigné pour aujourd'hui.
         </div>
       ) : (
-        bons.map(b => {
-          const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
-          return (
-            <div key={b.id} onClick={() => openBon(b)}
-              style={{background:"var(--color-background-primary)",borderRadius:12,border:"0.5px solid var(--color-border-tertiary)",marginBottom:10,overflow:"hidden",cursor:"pointer"}}>
-              <div style={{padding:"10px 14px",borderBottom:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,fontWeight:600,color:"#35B499"}}>{b.ref}</span>
-                <span style={{fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut)}}>{b.statut}</span>
-              </div>
-              <div style={{padding:"10px 14px"}}>
-                <div style={{fontSize:14,fontWeight:600,color:"var(--color-text-primary)",marginBottom:4}}>{b.clientNom} {b.clientPrenom}</div>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                  <span style={{fontSize:12,color:"var(--color-text-secondary)"}}>{b.type}</span>
-                  {ville && <span style={{fontSize:12,color:"#35B499",fontWeight:600}}>📍 {ville}</span>}
-                  {(b.prestations||[]).length > 0 && (
-                    <span style={{fontSize:11,fontWeight:600,padding:"1px 8px",borderRadius:20,background:"#e1f5ee",color:"#0e6b50"}}>
-                      📋 {b.prestations.filter(p=>p.done||p.nonRealise).length}/{b.prestations.length}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div style={{padding:"8px 14px",background:"#fafaf8",borderTop:"0.5px solid var(--color-border-tertiary)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Prévu à {b.heurePrevue}</span>
-                {b.statut==="planifié" && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>}
-                {b.statut==="en cours" && <span style={{fontSize:11,color:"#E8845C",fontWeight:600}}>Clôturer →</span>}
-                {b.statut==="terminé"  && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>✓ Terminé</span>}
-              </div>
-            </div>
-          );
-        })
+        bonsJour.map(b => <BonCard key={b.id} b={b} futur={false}/>)
+      )}
+
+      {/* ── Demain (préparation) ── */}
+      {bonsDemain.length > 0 && (
+        <div style={{marginTop:18}}>
+          <SectionTitle count={bonsDemain.length}>Demain — préparation</SectionTitle>
+          <p style={{fontSize:11,color:"var(--color-text-secondary)",fontStyle:"italic",marginBottom:8}}>
+            Consultation uniquement : le chantier ne peut être démarré que le jour de l'intervention.
+          </p>
+          {bonsDemain.map(b => <BonCard key={b.id} b={b} futur={true}/>)}
+        </div>
       )}
     </div>
   );
