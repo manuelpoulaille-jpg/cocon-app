@@ -9,27 +9,75 @@ import ContratModule from "./ContratModule";
 import CarburantModule from "./CarburantModule";
 import TachesModule from "./TachesModule";
 import PlanningDashboard from "./PlanningDashboard";
+import DevisModule from "./DevisModule";
 
 const TYPES = [
   "Désinsectisation", "Dératisation", "Traitement anti-termites",
   "Traitement anti-chauves-souris", "Désinfection", "Étanchéité / Toiture",
 ];
-const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
-
-// ── Entreprises (même logique que le Planning) ──
+// ── Entreprises : Cocon+ par défaut, Termit'iles en bleu ──
 const TERMITILES = "Termit'iles";
 const TERMITILES_BLUE = "#2E6FD8";
 const TERMITILES_BG = "rgba(46,111,216,0.08)";
 const isTermitiles = (b) => b?.entreprise === TERMITILES;
-// Liens d'avis Google — coller le lien Termit'iles ici quand il existe
-const AVIS_GOOGLE_COCON = "https://g.page/r/CcTWB8zHSCPzEAE/review";
-const AVIS_GOOGLE_TERMITILES = "";
-
+const DRIVE_WEBHOOK = "https://script.google.com/macros/s/AKfycbza4QR7FaxPNlYv_cFeOEhoRJfKX_HQzH2NSaKsX-lSZNZSMb-_ikfUKxzUZeb5S0J1/exec";
 const EMPTY_FORM = {
   clientSociete:"",clientNom:"",clientPrenom:"",clientTel:"",clientEmail:"",
   adresseFacturation:"",adresseIntervention:"",demandeClient:"",numDevis:"",signataire:"",
   types:[],datePrevue:"",heurePrevue:"",techId:"",numVisite:"1",montantFacture:"",
+  prestations:[],prestationsNonBloquantes:false,
 };
+
+// ── Prestations (lignes du devis à cocher par le technicien) ──────────────────
+const newPrestation=(label)=>({id:"p"+Date.now()+"_"+Math.random().toString(36).slice(2,7),label,done:false,nonRealise:false,motif:""});
+
+function PrestationsEditor({ prestations, onChange, nonBloquant, onNonBloquantChange }) {
+  const [draft,setDraft]=React.useState("");
+  const add=()=>{
+    const label=draft.trim();
+    if(!label) return;
+    onChange([...(prestations||[]),newPrestation(label)]);
+    setDraft("");
+  };
+  return(
+    <div>
+      {(prestations||[]).length===0&&(
+        <p style={{fontSize:12,color:"#aaa",fontStyle:"italic",margin:"0 0 10px"}}>Aucune ligne. Ajoutez chaque prestation du devis — le technicien devra toutes les cocher sur place.</p>
+      )}
+      {(prestations||[]).map((p,i)=>(
+        <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"0.5px solid #f0ede8"}}>
+          <span style={{fontSize:11,color:"#35B499",fontWeight:700,width:18,flexShrink:0}}>{i+1}.</span>
+          <input value={p.label}
+            onChange={e=>onChange(prestations.map(x=>x.id===p.id?{...x,label:e.target.value}:x))}
+            style={{flex:1,padding:"7px 10px",fontSize:13,border:"0.5px solid #e0ddd8",borderRadius:7,background:"white",color:"#1a1a1a",boxSizing:"border-box"}}/>
+          <button type="button" onClick={()=>onChange(prestations.filter(x=>x.id!==p.id))}
+            style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontSize:15,padding:"2px 6px",flexShrink:0}}>✕</button>
+        </div>
+      ))}
+      <div style={{display:"flex",gap:8,marginTop:10}}>
+        <input value={draft} onChange={e=>setDraft(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();add();}}}
+          placeholder="Ex : Traitement des combles, pose de 6 postes d'appâtage…"
+          style={{flex:1,padding:"8px 10px",fontSize:13,border:"0.5px solid #e0ddd8",borderRadius:7,background:"white",color:"#1a1a1a",boxSizing:"border-box"}}/>
+        <button type="button" onClick={add} disabled={!draft.trim()}
+          style={{fontSize:12,padding:"8px 14px",borderRadius:7,border:"none",background:"#35B499",color:"white",cursor:"pointer",fontWeight:600,opacity:draft.trim()?1:0.4,flexShrink:0}}>＋ Ajouter</button>
+      </div>
+      {(prestations||[]).length>0&&onNonBloquantChange&&(
+        <div onClick={()=>onNonBloquantChange(!nonBloquant)}
+          style={{display:"flex",alignItems:"flex-start",gap:10,marginTop:14,padding:"10px 12px",borderRadius:8,cursor:"pointer",background:nonBloquant?"#fff8f0":"#fafaf8",border:nonBloquant?"0.5px solid #e8c9b8":"0.5px solid #e0ddd8"}}>
+          <div style={{width:18,height:18,borderRadius:5,border:"2px solid #8B6A4E",background:nonBloquant?"#8B6A4E":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+            {nonBloquant&&<span style={{color:"white",fontSize:11,fontWeight:"bold"}}>✓</span>}
+          </div>
+          <div>
+            <p style={{fontSize:12,fontWeight:600,color:"#6b4a31",margin:0}}>⏳ Chantier sur plusieurs jours — clôture non bloquée</p>
+            <p style={{fontSize:11,color:"#888",margin:"2px 0 0"}}>Le technicien pourra clôturer ce bon même si des prestations restent à faire (elles seront reportées aux jours suivants). Sans cette case, toutes les lignes doivent être cochées ou justifiées.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SCOPED_CSS = `
 .ca-root{display:flex!important;height:100vh!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;background:#f0ede8!important}
 .ca-sidebar{width:210px!important;min-width:210px!important;background:#111d1b!important;display:flex!important;flex-direction:column!important;height:100vh!important;overflow-y:auto!important;flex-shrink:0!important;z-index:200!important;transition:transform .25s ease!important}
@@ -79,11 +127,11 @@ const SCOPED_CSS = `
 .ca-table td{padding:9px 12px!important;border-bottom:0.5px solid #f0ede8!important;color:#1a1a1a!important;vertical-align:middle!important}
 .ca-table tr:last-child td{border-bottom:none!important}
 .ca-table tr:hover td{background:#fafaf8!important;cursor:pointer!important}
-.ca-table tr.termitiles td{background:rgba(46,111,216,0.06)!important}
-.ca-table tr.termitiles td:first-child{box-shadow:inset 3px 0 0 #2E6FD8!important}
 .ca-ref{font-size:11px!important;color:#35B499!important;font-weight:600!important}
 .ca-ref.termitiles{color:#2E6FD8!important}
-.ca-ent-tag{display:inline-block!important;font-size:9px!important;font-weight:700!important;padding:1px 7px!important;border-radius:20px!important;background:#2E6FD8!important;color:white!important;white-space:nowrap!important;margin-top:3px!important}
+.ca-table tr.termitiles td{background:rgba(46,111,216,0.06)!important}
+.ca-table tr.termitiles td:first-child{box-shadow:inset 3px 0 0 #2E6FD8!important}
+.ca-ent-tag{display:inline-block!important;font-size:9px!important;font-weight:700!important;padding:1px 7px!important;border-radius:20px!important;background:#2E6FD8!important;color:white!important;white-space:nowrap!important}
 .ca-badge{font-size:10px!important;font-weight:500!important;padding:3px 9px!important;border-radius:20px!important;white-space:nowrap!important;display:inline-block!important}
 .ca-badge.planifie{background:#e1f5ee!important;color:#0e6b50!important}
 .ca-badge.encours{background:#f5e8d8!important;color:#6b4a31!important}
@@ -144,6 +192,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [form,setForm]=useState({...EMPTY_FORM});
   const [taches,setTaches]=useState([]);
   const [contrats,setContrats]=useState([]);
+  const [devis,setDevis]=useState([]);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const today=new Date().toLocaleDateString("fr-CA",{timeZone:"America/Martinique"});
 
@@ -151,7 +200,7 @@ export default function AdminDashboard({ user, onLogout }) {
     const id="ca-scoped-styles";
     if(!document.getElementById(id)){const el=document.createElement("style");el.id=id;el.textContent=SCOPED_CSS;document.head.appendChild(el);}
   },[]);
-  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();},[]);
+  useEffect(()=>{fetchBons();fetchTachesHome();fetchContratsHome();fetchDevisHome();},[]);
 
   const fetchBons=async()=>{const q=query(collection(db,"bons"),orderBy("createdAt","desc"));const snap=await getDocs(q);setBons(snap.docs.map(d=>({id:d.id,...d.data()})));};
   const fetchTachesHome = async () => {
@@ -167,6 +216,14 @@ export default function AdminDashboard({ user, onLogout }) {
       const snap = await getDocs(collection(db, "contrats"));
       const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setContrats(all);
+    } catch(e) {}
+  };
+
+  const fetchDevisHome = async () => {
+    try {
+      const snap = await getDocs(collection(db, "devis"));
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setDevis(all);
     } catch(e) {}
   };
 
@@ -191,6 +248,8 @@ export default function AdminDashboard({ user, onLogout }) {
         signatureTech:null,signatureClient:null,emailEnvoye:false,
         montantFacture:form.montantFacture?parseFloat(form.montantFacture):null,
         numVisite:form.numVisite||"1",
+        prestations:(form.prestations||[]).filter(p=>p.label.trim()),
+        prestationsNonBloquantes:!!form.prestationsNonBloquantes,
       });
       await fetchBons();setForm({...EMPTY_FORM});flashMsg("✅ Bon créé !");setView("dashboard");
     }catch(err){alert("Erreur : "+(err?.message||JSON.stringify(err)));}
@@ -225,8 +284,10 @@ export default function AdminDashboard({ user, onLogout }) {
       numDevis:editForm.numDevis,signataire:editForm.signataire||"",
       datePrevue:editForm.datePrevue,heurePrevue:editForm.heurePrevue,techNom:editForm.techId,
       types:editForm.types,type:editForm.types.join(", "),
+      prestations:(editForm.prestations||[]).filter(p=>p.label.trim()),
+      prestationsNonBloquantes:!!editForm.prestationsNonBloquantes,
     });
-    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", ")});
+    setSelected({...selected,...editForm,techNom:editForm.techId,type:editForm.types.join(", "),prestations:(editForm.prestations||[]).filter(p=>p.label.trim()),prestationsNonBloquantes:!!editForm.prestationsNonBloquantes});
     setEditMode(false);fetchBons();setSaving(false);
   };
 
@@ -264,11 +325,28 @@ export default function AdminDashboard({ user, onLogout }) {
     sec("CLIENT");if(bon.clientSociete)row("Société",bon.clientSociete);row("Nom",bon.clientNom+" "+bon.clientPrenom);row("Téléphone",bon.clientTel);row("Email",bon.clientEmail);
     if(bon.adresseFacturation)row("Adresse facturation",bon.adresseFacturation);row("Adresse intervention",bon.adresseIntervention||bon.clientAdresse);y+=2;
     if(bon.demandeClient){sec("DEMANDE CLIENT");const d=p.splitTextToSize(bon.demandeClient,175);p.text(d,ml,y);y+=d.length*5+5;}
+    if((bon.prestations||[]).length){
+      sec("PRESTATIONS");
+      bon.prestations.forEach(pr=>{
+        if(y>250){p.addPage();y=20;}
+        const mark=pr.done?"[X]":pr.nonRealise?"[!]":"[ ]";
+        const txt=p.splitTextToSize(mark+" "+pr.label+(pr.nonRealise?" — NON RÉALISÉ"+(pr.motif?" : "+pr.motif:""):""),175);
+        if(pr.nonRealise)p.setTextColor(192,57,43);
+        p.text(txt,ml,y);y+=txt.length*5+1;
+        if(pr.nonRealise)p.setTextColor(60,60,60);
+      });
+      const nbOk=bon.prestations.filter(pr=>pr.done).length;
+      p.setFontSize(9);p.setTextColor(53,180,153);
+      p.text(nbOk+"/"+bon.prestations.length+" prestation(s) réalisée(s)"+(bon.prestationsNonBloquantes&&nbOk<bon.prestations.length?" — chantier multi-jours, solde reporté":""),ml,y);
+      p.setFontSize(10);p.setTextColor(60,60,60);y+=7;
+    }
     sec("INTERVENTION");row("Type",bon.type);row("Prévu le",bon.datePrevue+" à "+bon.heurePrevue);
     row("Arrivée réelle",fmt(bon.heureArrivee));row("Fin intervention",fmt(bon.heureFin));row("Durée",calcDuree(bon.heureArrivee,bon.heureFin));
     if(bon.geoArrivee)row("Position arrivée",`Lat:${bon.geoArrivee.lat?.toFixed(5)},Lng:${bon.geoArrivee.lng?.toFixed(5)}`);y+=2;
+    if(y>235){p.addPage();y=20;}
     sec("COMPTE RENDU");const oC=p.splitTextToSize("Cocon+ : "+(bon.obsCocon||"—"),175);p.text(oC,ml,y);y+=oC.length*5+3;
     const oCl=p.splitTextToSize("Client : "+(bon.obsClient||"—"),175);p.text(oCl,ml,y);y+=oCl.length*5+5;
+    if(y>235){p.addPage();y=20;}
     sec("SIGNATURES");p.setFontSize(9);p.text("Collaborateur",ml,y);p.text("Client",ml+90,y);y+=3;
     if(bon.signatureTech){try{p.addImage(bon.signatureTech,"PNG",ml,y,80,30);}catch(e){}}else{p.setDrawColor(200,200,200);p.rect(ml,y,80,30);}
     if(bon.signatureClient){try{p.addImage(bon.signatureClient,"PNG",ml+90,y,80,30);}catch(e){}}else{p.setDrawColor(200,200,200);p.rect(ml+90,y,80,30);}
@@ -277,28 +355,12 @@ export default function AdminDashboard({ user, onLogout }) {
     if(autoSave)p.save(nom);return p.output("datauristring");
   };
 
-  // Message WhatsApp : adapté à l'entreprise du bon (Cocon+ ou Termit'iles)
   const demanderAvis=(bon)=>{
-    const termit=isTermitiles(bon);
-    const equipe=termit?"Termit'iles":"Cocon+";
-    const signature=termit?"Termit'iles":"Cocon Plus SARL";
-    const lienAvis=termit?AVIS_GOOGLE_TERMITILES:AVIS_GOOGLE_COCON;
     const prenom=bon.clientPrenom||bon.clientNom||"client";
+    const typeMinuscule=bon.type?bon.type.charAt(0).toLowerCase()+bon.type.slice(1):"intervention";
     const raw=(bon.clientTel||"").replace(/\s/g,"");
     const tel=raw.startsWith("+")?raw.slice(1):raw.startsWith("0696")?"596"+raw.slice(1):"596"+raw.slice(1);
-    const lignes=[
-      `🌿 Bonjour ${prenom},`,
-      "",
-      `L'équipe ${equipe} vient de réaliser votre ${bon.type} et espère que tout s'est bien passé !`,
-      "",
-    ];
-    if(lienAvis){
-      lignes.push("Un avis Google nous aiderait beaucoup 🙏",`👉 ${lienAvis}`,"");
-    }else{
-      lignes.push("N'hésitez pas à nous faire un petit retour sur l'intervention 🙏","");
-    }
-    lignes.push("Merci pour votre confiance,",signature);
-    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(lignes.join("\n"))}`,"_blank");
+    window.open(`https://web.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(`🌿 Bonjour ${prenom},\n\nNous venons de réaliser votre ${typeMinuscule} et espérons que tout s'est bien passé !\n\nUn avis Google nous aiderait beaucoup 🙏\n👉 https://g.page/r/CcTWB8zHSCPzEAE/review\n\nMerci pour votre confiance,\nCocon Plus SARL`)}`,"_blank");
   };
 
   const stats={
@@ -322,14 +384,12 @@ export default function AdminDashboard({ user, onLogout }) {
       <table className="ca-table">
         <thead><tr><th>Réf.</th>{showDate&&<th>Date</th>}<th>Client</th><th>Type</th><th>Heure</th><th>Collaborateur</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
         <tbody>
-          {data.map(b=>{
-            const termit=isTermitiles(b);
-            return(
-            <tr key={b.id} className={termit?"termitiles":""} onClick={()=>{setSelected(b);setView("detail");}}>
-              <td><span className={`ca-ref${termit?" termitiles":""}`}>{b.ref}</span>{termit&&<span className="ca-ent-tag" style={{display:"block"}}>Termit'iles</span>}</td>
+          {data.map(b=>(
+            <tr key={b.id} className={isTermitiles(b)?"termitiles":""} onClick={()=>{setSelected(b);setView("detail");}}>
+              <td><span className={`ca-ref${isTermitiles(b)?" termitiles":""}`}>{b.ref}</span>{isTermitiles(b)&&<span className="ca-ent-tag" style={{display:"block",width:"fit-content",marginTop:3}}>Termit'iles</span>}</td>
               {showDate&&<td style={{fontSize:11,color:"#888",whiteSpace:"nowrap"}}>{fmtDate(b.datePrevue)}</td>}
-              <td>{b.clientSociete&&<span style={{display:"block",fontSize:10,color:termit?TERMITILES_BLUE:"#35B499",fontWeight:600}}>{b.clientSociete}</span>}<span style={{fontWeight:500}}>{b.clientNom} {b.clientPrenom}</span><span style={{display:"block",fontSize:10,color:"#888"}}>{b.clientTel}</span></td>
-              <td style={{fontSize:11,color:"#555"}}>{b.type}</td>
+              <td>{b.clientSociete&&<span style={{display:"block",fontSize:10,color:"#35B499",fontWeight:600}}>{b.clientSociete}</span>}<span style={{fontWeight:500}}>{b.clientNom} {b.clientPrenom}</span><span style={{display:"block",fontSize:10,color:"#888"}}>{b.clientTel}</span></td>
+              <td style={{fontSize:11,color:"#555"}}>{b.type}{(b.prestations||[]).length>0&&<span style={{display:"block",fontSize:10,fontWeight:600,marginTop:2,color:b.prestations.some(p=>p.nonRealise)?"#c0392b":b.prestations.every(p=>p.done)?"#35B499":"#8B6A4E"}}>📋 {b.prestations.filter(p=>p.done).length}/{b.prestations.length}{b.prestations.some(p=>p.nonRealise)?" ⚠️":""}</span>}</td>
               <td style={{fontSize:12,whiteSpace:"nowrap"}}>{b.heurePrevue}</td>
               <td style={{fontSize:12}}>{b.techNom}</td>
               <td style={{fontSize:12,fontWeight:500,color:b.montantFacture?"#35B499":"#ccc"}}>{b.montantFacture?parseFloat(b.montantFacture).toFixed(2)+" €":"—"}</td>
@@ -338,7 +398,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 {b.statut==="terminé"&&<><button className="ca-btn-pdf" onClick={()=>downloadPDF(b)}>PDF</button>{b.clientTel&&<button className="ca-btn-wa" onClick={()=>demanderAvis(b)}>WA</button>}</>}
               </td>
             </tr>
-          );})}
+          ))}
         </tbody>
       </table>
     </div>
@@ -353,6 +413,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if(view==="carburant") return <div style={{flex:1,overflow:"auto"}}><CarburantModule user={user}/></div>;
     if(view==="taches") return <div style={{flex:1,overflow:"auto"}}><TachesModule/></div>;
     if(view==="planning") return <div style={{flex:1,overflow:"auto"}}><PlanningDashboard user={user} isAdmin={true}/></div>;
+    if(view==="devis") return <div style={{flex:1,overflow:"auto"}}><DevisModule onPlanifier={()=>{fetchBons();fetchDevisHome();flashMsg("✅ Bon d'intervention créé depuis le devis !");}}/></div>;
 
     if(view==="new") return(
       <div className="ca-form-zone">
@@ -377,6 +438,10 @@ export default function AdminDashboard({ user, onLogout }) {
             <div className="field"><label>Signataire (si différent)</label><input value={form.signataire} onChange={e=>setForm({...form,signataire:e.target.value})}/></div>
           </div>
           <div className="card" style={{marginBottom:16}}><div className="card-title">Demande client</div><div className="field"><textarea value={form.demandeClient} onChange={e=>setForm({...form,demandeClient:e.target.value})} placeholder="Contexte, motif…"/></div></div>
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-title">Prestations prévues (lignes du devis)</div>
+            <PrestationsEditor prestations={form.prestations} onChange={p=>setForm(f=>({...f,prestations:p}))} nonBloquant={form.prestationsNonBloquantes} onNonBloquantChange={v=>setForm(f=>({...f,prestationsNonBloquantes:v}))}/>
+          </div>
           <div className="card" style={{marginBottom:16}}>
             <div className="card-title">Type(s) d'intervention</div>
             <div className="types-grid">{TYPES.map(t=><button key={t} type="button" className={"type-btn"+(form.types.includes(t)?" active":"")} onClick={()=>setForm(f=>({...f,types:f.types.includes(t)?f.types.filter(x=>x!==t):[...f.types,t]}))}>{form.types.includes(t)?"✓ ":""}{t}</button>)}</div>
@@ -404,27 +469,29 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="field"><label>Signataire</label><input value={editForm.signataire||""} onChange={e=>setEditForm({...editForm,signataire:e.target.value})}/></div>
           <div className="field"><label>Demande client</label><textarea value={editForm.demandeClient} onChange={e=>setEditForm({...editForm,demandeClient:e.target.value})}/></div>
         </div>
+        <div className="card" style={{marginBottom:16}}>
+          <div className="card-title">Prestations prévues (lignes du devis)</div>
+          <PrestationsEditor prestations={editForm.prestations} onChange={p=>setEditForm(f=>({...f,prestations:p}))} nonBloquant={editForm.prestationsNonBloquantes} onNonBloquantChange={v=>setEditForm(f=>({...f,prestationsNonBloquantes:v}))}/>
+        </div>
         <div className="card" style={{marginBottom:16}}><div className="card-title">Types d'intervention</div><div className="types-grid">{TYPES.map(t=><button key={t} type="button" className={"type-btn"+(editForm.types.includes(t)?" active":"")} onClick={()=>setEditForm(f=>({...f,types:f.types.includes(t)?f.types.filter(x=>x!==t):[...f.types,t]}))}>{editForm.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>
         <button className="btn-primary" style={{width:"100%",marginBottom:32}} disabled={saving} onClick={saveEdit}>{saving?"Sauvegarde…":"Enregistrer"}</button>
       </div>
     );
 
-    if(view==="detail"&&selected) {
-      const termitSel=isTermitiles(selected);
-      return(
+    if(view==="detail"&&selected) return(
       <div className="ca-form-zone">
         {confirmDelete&&(<div style={{background:"#fdecea",border:"1px solid #f5c6cb",borderRadius:10,padding:"1rem",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><span style={{color:"#c0392b",fontSize:14,fontWeight:500}}>Confirmer la suppression ?</span><div style={{display:"flex",gap:8}}><button className="btn-outline" onClick={()=>setConfirmDelete(false)}>Annuler</button><button style={{background:"#c0392b",color:"white",border:"none",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontSize:13}} onClick={deleteBon}>Supprimer</button></div></div>)}
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
           <button onClick={()=>{setView("list");setSelected(null);setConfirmDelete(false);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#35B499",fontWeight:500}}>← Retour</button>
-          <h2 style={{margin:0,fontSize:16,fontWeight:600,color:termitSel?TERMITILES_BLUE:undefined}}>{selected.ref}</h2>
+          <h2 style={{margin:0,fontSize:16,fontWeight:600,color:isTermitiles(selected)?TERMITILES_BLUE:undefined}}>{selected.ref}</h2>
           <span className={`ca-badge ${scBadge(selected.statut)}`}>{selected.statut}</span>
-          {termitSel&&<span className="ca-ent-tag" style={{marginTop:0,fontSize:10,padding:"3px 9px"}}>Termit'iles</span>}
-          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[]});setEditMode(true);}}>Modifier</button>)}
+          {isTermitiles(selected)&&<span className="ca-ent-tag" style={{fontSize:10,padding:"3px 9px"}}>Termit'iles</span>}
+          {selected.statut==="planifié"&&!editMode&&(<button style={{background:"#E1F5EE",color:"#1a7a65",border:"0.5px solid #35B499",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>{setEditForm({clientNom:selected.clientNom,clientPrenom:selected.clientPrenom,clientTel:selected.clientTel,clientEmail:selected.clientEmail,clientSociete:selected.clientSociete||"",adresseFacturation:selected.adresseFacturation||"",adresseIntervention:selected.adresseIntervention||selected.clientAdresse||"",demandeClient:selected.demandeClient||"",numDevis:selected.numDevis||"",signataire:selected.signataire||"",datePrevue:selected.datePrevue,heurePrevue:selected.heurePrevue,techId:selected.techNom,types:selected.types||[],prestations:(selected.prestations||[]).map(p=>({...p})),prestationsNonBloquantes:!!selected.prestationsNonBloquantes});setEditMode(true);}}>Modifier</button>)}
           <button style={{marginLeft:"auto",background:"#fdecea",color:"#c0392b",border:"0.5px solid #f5c6cb",padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}} onClick={()=>setConfirmDelete(true)}>Supprimer</button>
         </div>
-        <div className="card" style={{marginBottom:12,borderLeft:termitSel?`4px solid ${TERMITILES_BLUE}`:undefined}}>
+        <div className="card" style={{marginBottom:12,borderLeft:isTermitiles(selected)?`4px solid ${TERMITILES_BLUE}`:undefined}}>
           <div className="card-title">Informations générales</div>
-          <div className="info-row"><span>Entreprise</span><b style={{color:termitSel?TERMITILES_BLUE:"#35B499"}}>{termitSel?"Termit'iles":"Cocon+"}</b></div>
+          <div className="info-row"><span>Entreprise</span><b style={{color:isTermitiles(selected)?TERMITILES_BLUE:"#35B499"}}>{isTermitiles(selected)?"Termit'iles":"Cocon+"}</b></div>
           {selected.numDevis&&<div className="info-row"><span>N° Devis</span><b>{selected.numDevis}</b></div>}
           {selected.numVisite&&<div className="info-row"><span>N° Visite</span><b style={{color:"#2a9d8f"}}>{selected.numVisite}</b></div>}
           {selected.montantFacture&&<div className="info-row"><span>Montant facturé</span><b style={{color:"#35B499"}}>{parseFloat(selected.montantFacture).toFixed(2)} €</b></div>}
@@ -443,6 +510,25 @@ export default function AdminDashboard({ user, onLogout }) {
           <div className="info-row"><span>Adresse intervention</span><b>{selected.adresseIntervention||selected.clientAdresse?<a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.adresseIntervention||selected.clientAdresse)}`} target="_blank" rel="noreferrer" style={{color:"#2a9d8f",textDecoration:"underline"}}>{selected.adresseIntervention||selected.clientAdresse} 📍</a>:"—"}</b></div>
         </div>
         {selected.demandeClient&&<div className="card" style={{marginBottom:12}}><div className="card-title">Demande client</div><p style={{fontSize:13,lineHeight:1.6,margin:0}}>{selected.demandeClient}</p></div>}
+        {(selected.prestations||[]).length>0&&(
+          <div className="card" style={{marginBottom:12}}>
+            <div className="card-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>📋 Prestations ({selected.prestations.filter(p=>p.done).length}/{selected.prestations.length} réalisées){selected.prestationsNonBloquantes&&<span style={{fontSize:10,fontWeight:600,color:"#8B6A4E",background:"#f5e8d8",padding:"2px 8px",borderRadius:20,marginLeft:8}}>⏳ Multi-jours</span>}</span>
+              {selected.prestations.some(p=>p.nonRealise)&&<span style={{fontSize:11,fontWeight:600,color:"#c0392b"}}>⚠️ {selected.prestations.filter(p=>p.nonRealise).length} non réalisée{selected.prestations.filter(p=>p.nonRealise).length>1?"s":""}</span>}
+            </div>
+            {selected.prestations.map((p,i)=>(
+              <div key={p.id||i} style={{padding:"8px 0",borderBottom:"0.5px solid #f0ede8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{width:20,height:20,borderRadius:5,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"white",background:p.done?"#35B499":p.nonRealise?"#e74c3c":"#ddd"}}>
+                    {p.done?"✓":p.nonRealise?"✗":""}
+                  </span>
+                  <span style={{fontSize:13,flex:1,color:p.nonRealise?"#c0392b":"#1a1a1a",textDecoration:p.done?"line-through":"none"}}>{p.label}</span>
+                </div>
+                {p.nonRealise&&p.motif&&<p style={{fontSize:12,color:"#c0392b",margin:"4px 0 0 30px",background:"#fdecea",padding:"5px 10px",borderRadius:7}}>Motif : {p.motif}</p>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="card" style={{marginBottom:12}}>
           <div className="card-title">Intervention</div>
           <div className="info-row"><span>Type(s)</span><b>{selected.type}</b></div>
@@ -465,10 +551,9 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
           </div>
         )}
-        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}><button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>{selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 {termitSel&&!AVIS_GOOGLE_TERMITILES?"Message WhatsApp Termit'iles":"Demander un avis Google"}</button>}</div>}
+        {selected.statut==="terminé"&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:32}}><button className="btn-primary" style={{flex:1}} onClick={()=>downloadPDF(selected)}>Télécharger le PDF</button>{selected.clientTel&&<button onClick={()=>demanderAvis(selected)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#25D366",color:"white",border:"none",padding:"12px 16px",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:600}}>💬 Demander un avis Google</button>}</div>}
       </div>
-      );
-    }
+    );
 
     if(view==="list") return(
       <div className="ca-content">
@@ -485,7 +570,6 @@ export default function AdminDashboard({ user, onLogout }) {
 
     // ACCUEIL 360°
     const bonsDuJour=bons.filter(b=>b.datePrevue===today).sort((a,b)=>(a.heurePrevue||"").localeCompare(b.heurePrevue||""));
-    const termitilesDuJour=bonsDuJour.filter(isTermitiles).length;
     const now2=new Date(),day2=now2.getDay(),diff2=day2===0?-6:1-day2;
     const mon2=new Date(now2);mon2.setDate(now2.getDate()+diff2);mon2.setHours(0,0,0,0);
     const sat2=new Date(mon2);sat2.setDate(mon2.getDate()+5);sat2.setHours(23,59,59,999);
@@ -556,7 +640,7 @@ export default function AdminDashboard({ user, onLogout }) {
         <div style={{fontSize:"9px",color:"#888",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:500,marginBottom:8}}>Opérations &amp; alertes</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
           {[
-            {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:termitilesDuJour>0?`${stats.enCours} en cours · ${termitilesDuJour} Termit'iles`:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
+            {label:"Bons du jour",          val:stats.aujourdhui, accent:"#35B499", sub:bonsDuJour.filter(isTermitiles).length>0?`${stats.enCours} en cours · ${bonsDuJour.filter(isTermitiles).length} Termit'iles`:`${stats.enCours} en cours`, onClick:()=>{setFilter("aujourdhui");setView("list");}},
             {label:"Contrats actifs",      val:contratsActifs,      accent:"#35B499", sub:`sur ${contrats.length} au total`, onClick:()=>setView("contrats")},
             {label:"Passages à planifier", val:aRelancerContrats,   accent:"#8B6A4E", sub:aRelancerContrats>0?"Relances à faire":"À jour", onClick:()=>setView("contrats")},
             {label:"Tâches en retard",      val:tachesRetard,     accent:"#c0392b", sub:tachesRetard>0?"Action requise":"Aucun retard", onClick:()=>setView("taches")},
@@ -585,8 +669,8 @@ export default function AdminDashboard({ user, onLogout }) {
               <div className="ca-empty">Aucune intervention aujourd'hui.</div>
             ):(
               bonsDuJour.slice(0,5).map(b=>{
-                const termit=isTermitiles(b);
                 const sc2=b.statut==="terminé"?"terminé":b.statut==="en cours"?"en cours":"planifié";
+                const termit=isTermitiles(b);
                 const dotColor=termit?TERMITILES_BLUE:sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#d4f0ea";
                 const dotBorder=termit?TERMITILES_BLUE:sc2==="terminé"?"#35B499":sc2==="en cours"?"#8B6A4E":"#35B499";
                 return(
@@ -594,10 +678,7 @@ export default function AdminDashboard({ user, onLogout }) {
                     <div style={{width:7,height:7,borderRadius:"50%",background:dotColor,border:`1.5px solid ${dotBorder}`,flexShrink:0}}/>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:11,fontWeight:500,color:"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.clientSociete||b.clientNom+" "+b.clientPrenom}</div>
-                      <div style={{fontSize:10,color:"#888"}}>
-                        {termit&&<span style={{color:TERMITILES_BLUE,fontWeight:700}}>Termit'iles · </span>}
-                        {b.type} · {b.heurePrevue}
-                      </div>
+                      <div style={{fontSize:10,color:"#888"}}>{termit&&<span style={{color:TERMITILES_BLUE,fontWeight:700}}>Termit'iles · </span>}{b.type} · {b.heurePrevue}</div>
                     </div>
                     <span style={{fontSize:9,fontWeight:500,padding:"2px 7px",borderRadius:20,background:sc2==="terminé"?"#35B499":sc2==="en cours"?"#f5e8d8":"#e1f5ee",color:sc2==="terminé"?"white":sc2==="en cours"?"#6b4a31":"#0e6b50",whiteSpace:"nowrap"}}>{b.statut}</span>
                   </div>
@@ -681,7 +762,7 @@ export default function AdminDashboard({ user, onLogout }) {
     );
   };
 
-  const viewTitle={dashboard:"Accueil",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
+  const viewTitle={dashboard:"Accueil",devis:"Devis",contrats:"Contrats",taches:"Tâches",list:"Interventions",new:"Nouveau bon",detail:"Détail",carburant:"Carburant",facturation:"Facturation",planning:"Planning"}[view]||"";
 
   return(
     <div className="ca-root">
@@ -690,6 +771,7 @@ export default function AdminDashboard({ user, onLogout }) {
         <div className="ca-nav">
           <div className="ca-nav-sec">Pilotage</div>
           <button className={`ca-nav-item${view==="dashboard"?" active":""}`} onClick={()=>setView("dashboard")}>{view==="dashboard"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Tableau de bord</button>
+          <button className={`ca-nav-item${view==="devis"?" active":""}`} onClick={()=>navigate("devis")}>{view==="devis"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#5c35b4"}}/> Devis{devis.filter(d=>d.statut==="demande"||d.statut==="validé").length>0&&<span className="ca-nav-badge" style={{background:"#5c35b4"}}>{devis.filter(d=>d.statut==="demande"||d.statut==="validé").length}</span>}</button>
           <button className={`ca-nav-item${isInterventionView?" active":""}`} onClick={()=>navigate("list")}>{isInterventionView&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#35B499"}}/> Interventions{(stats.planifie+stats.enCours)>0&&<span className="ca-nav-badge">{stats.planifie+stats.enCours}</span>}</button>
           <div className="ca-nav-sec">Opérations</div>
           <button className={`ca-nav-item${view==="contrats"?" active":""}`} onClick={()=>setView("contrats")}>{view==="contrats"&&<div className="ca-nav-bar"/>}<div className="ca-nav-pip" style={{background:"#8B6A4E"}}/> Contrats</button>
