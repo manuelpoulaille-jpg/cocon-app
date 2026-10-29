@@ -466,13 +466,6 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
         <div className="info-row"><span>Collaborateur</span><b>{selected.techNom}</b></div>
       </div>
 
-      {selected.demandeClient && (
-        <div className="card readonly">
-          <div className="card-title">Demande client <span className="locked-badge">🔒 Admin</span></div>
-          <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6}}>{selected.demandeClient}</p>
-        </div>
-      )}
-
       {prestations.length > 0 && (
         <div className="card" style={{border:"1px solid #35B499"}}>
           <div className="card-title" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -551,6 +544,13 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
               ⏳ Chantier sur plusieurs jours : vous pouvez clôturer ce bon même si des prestations restent à faire — elles seront reprises les jours suivants.
             </p>
           )}
+        </div>
+      )}
+
+      {selected.demandeClient && (
+        <div className="card readonly">
+          <div className="card-title">Demande client <span className="locked-badge">🔒 Admin</span></div>
+          <p style={{fontSize:13,color:"var(--color-text-primary)",lineHeight:1.6,whiteSpace:"pre-line"}}>{selected.demandeClient}</p>
         </div>
       )}
 

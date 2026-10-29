@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { localiserAdresse, distanceKm, BASE_COCON } from "../geoMartinique";
+import PrestationsEditor from "./PrestationsEditor";
 import {
   collection, getDocs, getDoc, addDoc, deleteDoc, doc, updateDoc, writeBatch, Timestamp,
 } from "firebase/firestore";
@@ -459,6 +460,9 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           numVisite:form.numVisite||"1",
           isRetouche:form.isRetouche||false,
           statutFacture:"a_facturer",
+          // Lignes du devis à cocher par le technicien ; sur plusieurs jours, chaque bon du jour reste clôturable
+          prestations:(form.prestations||[]).filter(p=>p.label.trim()).map(p=>({ ...p, label:p.label.trim() })),
+          prestationsNonBloquantes:joursTotal > 1,
         });
       }
       // Bon créé depuis une proposition de créneaux : la proposition est close
@@ -1159,6 +1163,10 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="field"><label>Demande client</label>
             <textarea value={form.demandeClient||""} onChange={e=>setForm(f=>({...f,demandeClient:e.target.value}))} placeholder="Contexte, motif…" rows={3} />
           </div>
+        </div>
+        <div className="card">
+          <div className="card-title">📋 Prestations à réaliser (lignes du devis)</div>
+          <PrestationsEditor prestations={form.prestations} onChange={p=>setForm(f=>({...f,prestations:p}))} />
         </div>
         {propErreur && estProposition && (
           <p style={{color:"#e74c3c",fontSize:12,marginBottom:10,padding:"8px 12px",background:"#fdecea",borderRadius:8,lineHeight:1.5}}>⚠️ {propErreur}</p>
