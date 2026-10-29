@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 import { doc, getDoc } from "firebase/firestore";
 import AdminDashboard from "./components/AdminDashboard";
 import TechDashboard from "./components/TechDashboard";
+import PropositionRdv from "./components/PropositionRdv";
 import "./App.css";
 
 export default function App() {
@@ -43,6 +44,11 @@ export default function App() {
     }
     setLoggingIn(false);
   };
+
+  // ── PAGE PUBLIQUE : le client choisit un créneau proposé (lien ?rdv=…) ─────
+
+  const rdvToken = new URLSearchParams(window.location.search).get("rdv");
+  if (rdvToken) return <PropositionRdv token={rdvToken} />;
 
   // ── CHARGEMENT ────────────────────────────────────────────────────────────
 
