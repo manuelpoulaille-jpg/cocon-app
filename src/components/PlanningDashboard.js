@@ -126,6 +126,54 @@ const genererToken = () => {
 };
 
 const MAX_CRENEAUX = 4;
+
+// Durée habituelle par type d'intervention (minutes) : fixe la fin des créneaux proposés
+const DUREES_TYPE = {
+  "Dératisation":60, "Désinsectisation":60, "Désinfection":90,
+  "Anti-termites":300, "Rénovation toiture":300, "Étanchéité":300, "Anti-chauves-souris":300,
+};
+const DUREE_DEFAUT = 120;
+
+// Journée de travail des équipes
+const JOURNEE_DEBUT = "07:30";
+const JOURNEE_FIN   = "14:00";
+const DUREES_CHOIX = [30, 60, 90, 120, 180, 240, 300, 360, 480];
+
+// Interventions longues : on essaie d'en faire une seule par jour et par famille
+const FAMILLES_UNE_PAR_JOUR = [["Anti-termites"], ["Rénovation toiture","Étanchéité"], ["Anti-chauves-souris"]];
+const familleDuType = (type) => FAMILLES_UNE_PAR_JOUR.find(f => f.includes(type));
+
+const ajouterMinutes = (heure, minutes) => {
+  const [h, m] = (heure || "08:00").split(":").map(Number);
+  const total = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2,"0")}:${String(total % 60).padStart(2,"0")}`;
+};
+
+const retirerMinutes = (heure, minutes) => {
+  const [h, m] = heure.split(":").map(Number);
+  const total = Math.max(h * 60 + m - minutes, 0);
+  return `${String(Math.floor(total / 60)).padStart(2,"0")}:${String(total % 60).padStart(2,"0")}`;
+};
+
+// 60 → "1h", 90 → "1h30", 30 → "30 min"
+const fmtDuree = (minutes) => {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h ? `${h}h${m ? String(m).padStart(2,"0") : ""}` : `${m} min`;
+};
+
+// Durée d'une proposition (les premières propositions n'avaient pas de dureeMinutes)
+const dureeProposition = (p) => {
+  if (p.dureeMinutes) return p.dureeMinutes;
+  const c = (p.creneaux || [])[0];
+  if (!c?.debut || !c?.fin) return DUREE_DEFAUT;
+  const [dh, dm] = c.debut.split(":").map(Number), [fh, fm] = c.fin.split(":").map(Number);
+  return fh * 60 + fm - dh * 60 - dm;
+};
+
+const avecDuree = (f, minutes) => ({
+  ...f, dureeMinutes: minutes,
+  creneaux: (f.creneaux || []).map(c => ({ ...c, fin: ajouterMinutes(c.debut, minutes) })),
+});
 const PROP_OUVERTES = ["en attente", "choisi", "aucun"];
 const PROP_COULEUR = "#8B6A4E";
 
@@ -238,22 +286,33 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const handleProposerButton = () => {
     setPropErreur("");
-    setForm({ mode:"proposition", entreprise:COCON, creneaux:[{ date:"", debut:"08:00", fin:"10:00" }] });
+    setForm({ mode:"proposition", entreprise:COCON, dureeMinutes:DUREE_DEFAUT,
+      creneaux:[{ date:"", debut:JOURNEE_DEBUT, fin:ajouterMinutes(JOURNEE_DEBUT, DUREE_DEFAUT) }] });
     setFormStep(1);
   };
 
-  // Autres interventions (bons ou créneaux déjà proposés) qui chevauchent un créneau
-  const occupations = (c) => {
-    if (!c.date || !c.debut || !c.fin) return [];
+  // Ce qui gêne un créneau proposé : chevauchements, et intervention longue de la même famille le même jour
+  const occupations = (c, type) => {
+    if (!c.date || !c.debut || !c.fin) return { chevauchements:[], memeJour:[] };
     const chevauche = (debut, fin) => debut && fin && debut < c.fin && fin > c.debut;
-    const parBons = tousBons
-      .filter(b => b.datePrevue === c.date && chevauche(b.heurePrevue, b.heureFinPrevue || defaultHeureFinPrevue(b.heurePrevue)))
-      .map(b => `${b.heurePrevue}–${b.heureFinPrevue||"?"} ${b.clientNom} (${b.techNom})`);
-    const parProps = propositions
+    const slotsProposes = propositions
       .flatMap(p => (p.creneaux||[]).map((x, i) => ({ p, x, i })))
-      .filter(({ p, x, i }) => x.date === c.date && chevauche(x.debut, x.fin) && (p.statut === "en attente" || p.choix === i))
-      .map(({ p, x }) => `${x.debut}–${x.fin} ${p.clientNom} (proposé)`);
-    return [...parBons, ...parProps];
+      .filter(({ p, x, i }) => x.date === c.date && (p.statut === "en attente" || p.choix === i));
+    const bonsDuJour = tousBons.filter(b => b.datePrevue === c.date);
+    const chevauchements = [
+      ...bonsDuJour
+        .filter(b => chevauche(b.heurePrevue, b.heureFinPrevue || defaultHeureFinPrevue(b.heurePrevue)))
+        .map(b => `${b.heurePrevue}–${b.heureFinPrevue||"?"} ${b.clientNom} (${b.techNom})`),
+      ...slotsProposes.filter(({ x }) => chevauche(x.debut, x.fin)).map(({ p, x }) => `${x.debut}–${x.fin} ${p.clientNom} (proposé)`),
+    ];
+    // Les retouches, courtes, ne comptent pas dans la limite d'une intervention longue par jour
+    const famille = familleDuType(type);
+    const memeJour = !famille ? [] : [
+      ...bonsDuJour.filter(b => !b.isRetouche && famille.includes(b.type)).map(b => `${b.clientNom} (${b.type})`),
+      ...[...new Map(slotsProposes.filter(({ p }) => famille.includes(p.type)).map(({ p }) => [p.id, p])).values()]
+        .map(p => `${p.clientNom} (${p.type}, proposé)`),
+    ];
+    return { chevauchements, memeJour };
   };
 
   const ouvrirProposition = async (p) => {
@@ -444,11 +503,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const puces = ["1️⃣","2️⃣","3️⃣","4️⃣"];
     const lignes = p.creneaux.map((c, i) => {
       const jour = fmtDateLong(c.date);
-      return `${plusieurs ? puces[i] : "📅"} ${jour.charAt(0).toUpperCase() + jour.slice(1)} · ${fmtHeure(c.debut)} → ${fmtHeure(c.fin)}`;
+      return `${plusieurs ? puces[i] : "📅"} ${jour.charAt(0).toUpperCase() + jour.slice(1)} à ${fmtHeure(c.debut)}`;
     }).join("\n");
     return `Bonjour ${p.salutation},\n\n`
       + `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`
-      + `🔧 ${p.type}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
+      + `🔧 ${p.type}\n⏱️ Durée : environ ${fmtDuree(dureeProposition(p))}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
       + `${lignes}\n\n`
       + `${plusieurs ? "Choisissez celui qui vous convient le mieux ici" : "Dites-nous s'il vous convient ici"} :\n`
       + `👉 ${window.location.origin}/?rdv=${token}\n\n`
@@ -464,10 +523,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     try {
       const token    = genererToken();
       const creneaux = [...form.creneaux].sort((a,b) => (a.date + a.debut).localeCompare(b.date + b.debut));
-      const { mode, creneaux: _creneaux, ...infosBon } = form;
+      const { mode, creneaux: _creneaux, dureeMinutes, ...infosBon } = form;
       const publique = {
         salutation: form.clientPrenom || form.clientNom,
         type: form.type, adresse: form.adresseIntervention, creneaux,
+        dureeMinutes: dureeMinutes || DUREE_DEFAUT,
         statut:"en attente", choix:null, commentaireClient:"", reponduLe:null,
         createdAt: Timestamp.now(),
         // Le client ne peut plus répondre à partir du jour du dernier créneau
@@ -687,6 +747,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     background:"var(--color-background-primary)", color:"var(--color-text-primary)",
   };
 
+  const appliquerDuree = (minutes) => setForm(f => avecDuree(f, minutes));
+
   // Collaborateur, type, retouche : commun au bon et à la proposition de créneaux
   const carteIntervention = (
     <div className="card">
@@ -698,7 +760,10 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </select>
       </div>
       <div className="field"><label>Type d'intervention *</label>
-        <select style={selectStyle} value={form.type||""} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+        <select style={selectStyle} value={form.type||""} onChange={e=>{
+          const type = e.target.value;
+          setForm(f => f.mode === "proposition" ? avecDuree({ ...f, type }, DUREES_TYPE[type] || DUREE_DEFAUT) : { ...f, type });
+        }}>
           <option value="">Choisir un type…</option>
           {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
         </select>
@@ -714,22 +779,26 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   if (formStep === 1 && form.mode === "proposition") {
     const creneaux = form.creneaux || [];
     const demain = fmtDate(new Date(Date.now() + 86400000));
+    const duree = form.dureeMinutes || DUREE_DEFAUT;
     const creneauxOk = creneaux.length > 0 && creneaux.every(c => c.date >= demain && c.debut && c.fin && c.fin > c.debut);
     const canGoNext = creneauxOk && form.techNom && form.type;
 
+    // La fin de chaque créneau découle de l'heure d'arrivée + la durée estimée (jamais montrée au client)
     const majCreneau = (i, champ, valeur) => setForm(f => ({
       ...f,
       creneaux: f.creneaux.map((c, j) => {
         if (j !== i) return c;
         const maj = { ...c, [champ]: valeur };
-        if (champ === "debut" && (!maj.fin || maj.fin <= valeur)) maj.fin = defaultHeureFinPrevue(valeur);
+        if (champ === "debut") maj.fin = ajouterMinutes(valeur, f.dureeMinutes || DUREE_DEFAUT);
         return maj;
       }),
     }));
     const ajouterCreneau = () => setForm(f => {
-      const dernier = f.creneaux[f.creneaux.length - 1] || { debut:"08:00", fin:"10:00" };
-      return { ...f, creneaux: [...f.creneaux, { date:"", debut:dernier.debut, fin:dernier.fin }] };
+      const debut = (f.creneaux[f.creneaux.length - 1] || {}).debut || JOURNEE_DEBUT;
+      return { ...f, creneaux: [...f.creneaux, { date:"", debut, fin:ajouterMinutes(debut, f.dureeMinutes || DUREE_DEFAUT) }] };
     });
+    const choixDurees = [...new Set([...DUREES_CHOIX, duree])].sort((a,b) => a - b);
+    const arriveeMax = retirerMinutes(JOURNEE_FIN, duree); // pour finir avant la fin de journée
     const retirerCreneau = (i) => setForm(f => ({ ...f, creneaux: f.creneaux.filter((_, j) => j !== i) }));
 
     return (
@@ -743,13 +812,19 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="card-title">Attribuée à</div>
           <EntrepriseToggle value={form.entreprise} onChange={e=>setForm(f=>({...f,entreprise:e}))} />
         </div>
+        {carteIntervention}
         <div className="card">
           <div className="card-title">Créneaux proposés au client</div>
           <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:6}}>
-            {MAX_CRENEAUX} créneaux maximum, à partir de demain. Le client choisit celui qui lui convient, puis vous le rappelez pour confirmer.
+            {MAX_CRENEAUX} créneaux maximum, à partir de demain. Le client voit l'heure d'arrivée et la durée approximative, jamais l'heure de fin. Il choisit, puis vous le rappelez pour confirmer.
           </p>
+          <div className="field"><label>Durée estimée de l'intervention</label>
+            <select style={selectStyle} value={duree} onChange={e => appliquerDuree(Number(e.target.value))}>
+              {choixDurees.map(m => <option key={m} value={m}>{fmtDuree(m)}{m === DUREES_TYPE[form.type] ? " (habituel)" : ""}</option>)}
+            </select>
+          </div>
           {creneaux.map((c, i) => {
-            const occ = occupations(c);
+            const { chevauchements, memeJour } = occupations(c, form.type);
             return (
               <div key={i} style={{padding:"10px 0",borderBottom:i<creneaux.length-1?"0.5px solid var(--color-border-tertiary)":"none"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
@@ -763,16 +838,24 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                 <div className="field"><label>Date *</label>
                   <input type="date" min={demain} value={c.date} onChange={e=>majCreneau(i,"date",e.target.value)} />
                 </div>
-                <div className="row2">
-                  <div className="field" style={{marginBottom:0}}><label>Heure de début *</label>
-                    <input type="time" value={c.debut} onChange={e=>majCreneau(i,"debut",e.target.value)} />
-                  </div>
-                  <div className="field" style={{marginBottom:0}}><label>Heure de fin *</label>
-                    <input type="time" value={c.fin} min={c.debut} onChange={e=>majCreneau(i,"fin",e.target.value)} />
-                  </div>
+                <div className="field" style={{marginBottom:0}}><label>Heure d'arrivée *</label>
+                  <input type="time" value={c.debut} onChange={e=>majCreneau(i,"debut",e.target.value)} />
                 </div>
-                {occ.length > 0 && (
-                  <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>⚠️ Déjà prévu sur ce créneau : {occ.join(" · ")}</p>
+                <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:4}}>
+                  Bloqué dans le planning jusqu'à {c.fin} (environ {fmtDuree(duree)})
+                </p>
+                {(c.debut < JOURNEE_DEBUT || c.fin > JOURNEE_FIN) && (
+                  <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>
+                    ⚠️ Hors de la journée de travail ({fmtHeure(JOURNEE_DEBUT)} – {fmtHeure(JOURNEE_FIN)}){arriveeMax >= JOURNEE_DEBUT ? ` : pour ${fmtDuree(duree)}, arriver au plus tard à ${fmtHeure(arriveeMax)}` : ""}.
+                  </p>
+                )}
+                {chevauchements.length > 0 && (
+                  <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>⚠️ Déjà prévu sur ce créneau : {chevauchements.join(" · ")}</p>
+                )}
+                {memeJour.length > 0 && (
+                  <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>
+                    ⚠️ Déjà une intervention {familleDuType(form.type).join(" / ")} ce jour-là : {memeJour.join(" · ")}. On essaie d'en faire une seule par jour.
+                  </p>
                 )}
               </div>
             );
@@ -781,7 +864,6 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             <button type="button" className="btn-outline" style={{width:"100%",marginTop:10}} onClick={ajouterCreneau}>+ Ajouter un créneau</button>
           )}
         </div>
-        {carteIntervention}
         <button className="btn-primary" style={{width:"100%",opacity:canGoNext?1:0.4}} disabled={!canGoNext} onClick={()=>setFormStep(2)}>
           Suivant — Informations client →
         </button>

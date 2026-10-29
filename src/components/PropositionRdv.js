@@ -21,7 +21,19 @@ const fmtHeure = (h) => {
   return mm === 0 ? `${hh}h` : `${hh}h${String(mm).padStart(2,"0")}`;
 };
 
-const fmtCreneau = (c) => `${fmtHeure(c.debut)}${c.fin ? ` → ${fmtHeure(c.fin)}` : ""}`;
+// Le client voit l'heure d'arrivée et une durée approximative, jamais l'heure de fin
+const fmtDuree = (minutes) => {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h ? `${h}h${m ? String(m).padStart(2,"0") : ""}` : `${m} min`;
+};
+
+const dureeProposition = (p) => {
+  if (p.dureeMinutes) return p.dureeMinutes;
+  const c = (p.creneaux || [])[0];
+  if (!c?.debut || !c?.fin) return null;
+  const [dh, dm] = c.debut.split(":").map(Number), [fh, fm] = c.fin.split(":").map(Number);
+  return fh * 60 + fm - dh * 60 - dm;
+};
 
 const aujourdhui = () => new Date().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" });
 
@@ -106,6 +118,7 @@ export default function PropositionRdv({ token }) {
   const recapIntervention = (
     <div style={{fontSize:14, color:"#444", marginBottom:16, lineHeight:1.6}}>
       {prop.type && <div>🔧 {prop.type}</div>}
+      {dureeProposition(prop) > 0 && <div>⏱️ Durée : environ {fmtDuree(dureeProposition(prop))}</div>}
       {prop.adresse && <div>📍 {prop.adresse}</div>}
     </div>
   );
@@ -124,7 +137,7 @@ export default function PropositionRdv({ token }) {
       {prop.statut === "choisi" && choisi && (
         <div style={encadre("#e8f5f3", VERT, "#1a7a65")}>
           ✅ <b>Merci, vous avez choisi :</b><br />
-          📅 {fmtJour(choisi.date)} · {fmtCreneau(choisi)}<br />
+          📅 {fmtJour(choisi.date)} à {fmtHeure(choisi.debut)}<br />
           <span style={{color:"#444"}}>Nous vous appelons très prochainement pour confirmer ce rendez-vous.</span>
         </div>
       )}
@@ -176,7 +189,7 @@ export default function PropositionRdv({ token }) {
                   boxShadow:selectionne ? "inset 0 0 0 3px white" : "none"}} />
                 <span>
                   <b>{fmtJour(c.date)}</b><br />
-                  <span style={{fontSize:14, color:actif ? "#555" : "#aaa"}}>{fmtCreneau(c)}{!actif ? " · plus disponible" : ""}</span>
+                  <span style={{fontSize:14, color:actif ? "#555" : "#aaa"}}>Arrivée à {fmtHeure(c.debut)}{!actif ? " · plus disponible" : ""}</span>
                 </span>
               </button>
             );
