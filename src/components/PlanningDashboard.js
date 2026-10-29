@@ -386,14 +386,15 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       tournee.forEach(o => { if (o.debut > curseur) trous.push([curseur, o.debut]); if (o.fin > curseur) curseur = o.fin; });
       if (curseur < JOURNEE_FIN) trous.push([curseur, JOURNEE_FIN]);
       const candidats = trous.map(([libreDe, libreA]) => {
-        // En début de journée, on arrive juste à temps pour enchaîner avec l'intervention suivante ; sinon juste après la précédente
-        let debut = libreDe === JOURNEE_DEBUT && libreA !== JOURNEE_FIN
+        // Intervention longue (une par jour) : dès 7h30, ou au plus tôt après ce qui occupe le début de matinée.
+        // Intervention courte en début de journée : on arrive juste à temps pour enchaîner avec la suivante.
+        let debut = !famille && libreDe === JOURNEE_DEBUT && libreA !== JOURNEE_FIN
           ? arrondir15(retirerMinutes(libreA, duree), false) : arrondir15(libreDe, true);
         if (debut < JOURNEE_DEBUT) debut = JOURNEE_DEBUT;
         const fin = ajouterMinutes(debut, duree);
         return fin <= libreA ? { date, debut, fin, ...detour(lieuClient, date, debut, fin, f.techNom) } : null;
       }).filter(Boolean);
-      if (candidats.length) parJour.push(candidats.sort((a, b) => a.km - b.km)[0]);
+      if (candidats.length) parJour.push(famille ? candidats[0] : candidats.sort((a, b) => a.km - b.km)[0]);
     }
     return parJour.sort((a, b) => a.km - b.km || a.date.localeCompare(b.date)).slice(0, 5);
   };
@@ -845,7 +846,12 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       <div className="field"><label>Type d'intervention *</label>
         <select style={selectStyle} value={form.type||""} onChange={e=>{
           const type = e.target.value;
-          setForm(f => f.mode === "proposition" ? avecDuree({ ...f, type }, DUREES_TYPE[type] || DUREE_DEFAUT) : { ...f, type });
+          setForm(f => {
+            if (f.mode !== "proposition") return { ...f, type };
+            // Intervention longue (une par jour) : arrivée à 7h30 par défaut
+            const creneaux = familleDuType(type) ? (f.creneaux || []).map(c => ({ ...c, debut:JOURNEE_DEBUT })) : f.creneaux;
+            return avecDuree({ ...f, type, creneaux }, DUREES_TYPE[type] || DUREE_DEFAUT);
+          });
         }}>
           <option value="">Choisir un type…</option>
           {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
@@ -877,7 +883,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       }),
     }));
     const ajouterCreneau = () => setForm(f => {
-      const debut = (f.creneaux[f.creneaux.length - 1] || {}).debut || JOURNEE_DEBUT;
+      const debut = familleDuType(f.type) ? JOURNEE_DEBUT : (f.creneaux[f.creneaux.length - 1] || {}).debut || JOURNEE_DEBUT;
       return { ...f, creneaux: [...f.creneaux, { date:"", debut, fin:ajouterMinutes(debut, f.dureeMinutes || DUREE_DEFAUT) }] };
     });
     const choixDurees = [...new Set([...DUREES_CHOIX, duree])].sort((a,b) => a - b);
