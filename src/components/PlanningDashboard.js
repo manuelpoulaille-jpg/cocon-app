@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection, getDocs, addDoc, deleteDoc, doc, updateDoc, Timestamp,
+  collection, getDocs, getDoc, addDoc, deleteDoc, doc, updateDoc, writeBatch, Timestamp,
 } from "firebase/firestore";
 
 const TECH_COLORS_MAP = {
@@ -116,6 +116,23 @@ const fmtDayShort = (dateStr) =>
 const statutBg = (s) =>
   ({ planifié:"#d4f0ea","en cours":"#fff0e0",terminé:"#35B499" }[s] || "#eee");
 
+// ── Propositions de créneaux au client (lien WhatsApp → page publique ?rdv=<jeton>) ──
+// Le jeton est l'identifiant du document rdvPropositions : il doit être impossible à deviner.
+const genererToken = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const valeurs = new Uint32Array(24);
+  window.crypto.getRandomValues(valeurs);
+  return Array.from(valeurs, n => chars[n % chars.length]).join("");
+};
+
+const MAX_CRENEAUX = 4;
+const PROP_OUVERTES = ["en attente", "choisi", "aucun"];
+const PROP_COULEUR = "#8B6A4E";
+
+const fmtTimestamp = (ts) => ts?.toDate
+  ? ts.toDate().toLocaleString("fr-FR", { timeZone:"America/Martinique", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
+  : "";
+
 export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBon }) {
   const isAdmin = isAdminProp !== undefined ? isAdminProp : user?.role === "admin";
 
@@ -146,6 +163,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [waMessage, setWaMessage] = useState("");
   const [waNextWeekBons, setWaNextWeekBons] = useState([]);
   const [waCopied, setWaCopied] = useState(false);
+  const [propositions, setPropositions] = useState([]);   // rdvPropositions encore ouvertes (admin)
+  const [selectedProp, setSelectedProp] = useState(null);
+  const [propPrive, setPropPrive]       = useState(null);  // infos client de la proposition ouverte
+  const [propEnvoi, setPropEnvoi]       = useState(null);  // { texte, tel } : message à envoyer au client
+  const [propErreur, setPropErreur]     = useState("");
+  const [annulConfirm, setAnnulConfirm] = useState(false);
+  const [copie, setCopie]               = useState("");
+  const [tousBons, setTousBons]         = useState([]);
   const [indispoFormOpen, setIndispoFormOpen] = useState(false);
   const [indispoData, setIndispoData] = useState({ techNom:"",dateDebut:"",dateFin:"",motif:"Congé",jourUnique:false });
 
@@ -158,12 +183,19 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       const allBons  = bonsSnap.docs.map(d => ({ id:d.id,...d.data() }));
       const filtered = allBons.filter(b => b.datePrevue >= rangeStart && b.datePrevue <= rangeEnd);
       setBons(filtered);
+      setTousBons(allBons);
       const names = [...new Set(filtered.map(b=>b.techNom).filter(Boolean))];
       const colors = { ...TECH_COLORS_MAP };
       names.forEach((name,i) => { if (!colors[name]) colors[name] = TECH_COLORS_ARRAY[i % TECH_COLORS_ARRAY.length]; });
       setTechColors(colors);
       const indisposSnap = await getDocs(collection(db,"indispos"));
       setIndispos(indisposSnap.docs.map(d => ({ id:d.id,...d.data() })));
+      if (isAdmin) {
+        try {
+          const propSnap = await getDocs(collection(db,"rdvPropositions"));
+          setPropositions(propSnap.docs.map(d => ({ id:d.id,...d.data() })).filter(p => PROP_OUVERTES.includes(p.statut)));
+        } catch(e) { console.error("Lecture des propositions de créneaux:", e); }
+      }
     } catch(e) { console.error("Planning fetchData error:", e); }
     setLoading(false);
   };
@@ -202,6 +234,37 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const defaultDate = fmtDate(new Date());
     setForm({ entreprise:COCON, datePrevue:defaultDate, horaires:{ [defaultDate]:{ debut:hStr, fin:defaultHeureFinPrevue(hStr) } } });
     setFormStep(1);
+  };
+
+  const handleProposerButton = () => {
+    setPropErreur("");
+    setForm({ mode:"proposition", entreprise:COCON, creneaux:[{ date:"", debut:"08:00", fin:"10:00" }] });
+    setFormStep(1);
+  };
+
+  // Autres interventions (bons ou créneaux déjà proposés) qui chevauchent un créneau
+  const occupations = (c) => {
+    if (!c.date || !c.debut || !c.fin) return [];
+    const chevauche = (debut, fin) => debut && fin && debut < c.fin && fin > c.debut;
+    const parBons = tousBons
+      .filter(b => b.datePrevue === c.date && chevauche(b.heurePrevue, b.heureFinPrevue || defaultHeureFinPrevue(b.heurePrevue)))
+      .map(b => `${b.heurePrevue}–${b.heureFinPrevue||"?"} ${b.clientNom} (${b.techNom})`);
+    const parProps = propositions
+      .flatMap(p => (p.creneaux||[]).map((x, i) => ({ p, x, i })))
+      .filter(({ p, x, i }) => x.date === c.date && chevauche(x.debut, x.fin) && (p.statut === "en attente" || p.choix === i))
+      .map(({ p, x }) => `${x.debut}–${x.fin} ${p.clientNom} (proposé)`);
+    return [...parBons, ...parProps];
+  };
+
+  const ouvrirProposition = async (p) => {
+    setSelectedProp(p);
+    setPropPrive(null);
+    setPropErreur("");
+    setAnnulConfirm(false);
+    try {
+      const snap = await getDoc(doc(db,"rdvPropositions",p.id,"prive","bon"));
+      setPropPrive(snap.exists() ? snap.data() : {});
+    } catch(e) { console.error("Lecture proposition:", e); setPropPrive({}); }
   };
 
   const handleBonClick = (e, bon) => {
@@ -255,6 +318,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           isRetouche:form.isRetouche||false,
           statutFacture:"a_facturer",
         });
+      }
+      // Bon créé depuis une proposition de créneaux : la proposition est close
+      if (form.propositionToken) {
+        try { await updateDoc(doc(db,"rdvPropositions",form.propositionToken), { statut:"planifié" }); }
+        catch(e) { console.error("Clôture de la proposition:", e); }
       }
       setFormStep(null); setForm({}); await fetchData();
     } catch(e) { console.error("Erreur création bon:", e); }
@@ -352,6 +420,95 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       await updateDoc(doc(db, "bons", bon.id), { rappelEnvoye: true, dateRappel: Timestamp.now() });
       applyBonPatch(bon.id, { rappelEnvoye: true });
     } catch(e) { console.error("Erreur rappel:", e); }
+  };
+
+  // ── Propositions de créneaux au client ───────────────────────────────────
+
+  const copierTexte = async (texte, quoi) => {
+    try {
+      await navigator.clipboard.writeText(texte);
+    } catch(e) {
+      const ta = document.createElement("textarea");
+      ta.value = texte;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopie(quoi);
+    setTimeout(() => setCopie(""), 3000);
+  };
+
+  const messageProposition = (p, token) => {
+    const plusieurs = p.creneaux.length > 1;
+    const puces = ["1️⃣","2️⃣","3️⃣","4️⃣"];
+    const lignes = p.creneaux.map((c, i) => {
+      const jour = fmtDateLong(c.date);
+      return `${plusieurs ? puces[i] : "📅"} ${jour.charAt(0).toUpperCase() + jour.slice(1)} · ${fmtHeure(c.debut)} → ${fmtHeure(c.fin)}`;
+    }).join("\n");
+    return `Bonjour ${p.salutation},\n\n`
+      + `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`
+      + `🔧 ${p.type}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
+      + `${lignes}\n\n`
+      + `${plusieurs ? "Choisissez celui qui vous convient le mieux ici" : "Dites-nous s'il vous convient ici"} :\n`
+      + `👉 ${window.location.origin}/?rdv=${token}\n\n`
+      + `Nous vous rappellerons ensuite pour confirmer le rendez-vous.\n`
+      + `Pour toute question : 0596 73 66 66\nCocon Plus SARL`;
+  };
+
+  // Enregistre la proposition : partie publique (lue par le client) + partie privée (infos du futur bon)
+  const createProposition = async () => {
+    if (!form.clientNom || !form.adresseIntervention || !form.clientTel) return;
+    setSaving(true);
+    setPropErreur("");
+    try {
+      const token    = genererToken();
+      const creneaux = [...form.creneaux].sort((a,b) => (a.date + a.debut).localeCompare(b.date + b.debut));
+      const { mode, creneaux: _creneaux, ...infosBon } = form;
+      const publique = {
+        salutation: form.clientPrenom || form.clientNom,
+        type: form.type, adresse: form.adresseIntervention, creneaux,
+        statut:"en attente", choix:null, commentaireClient:"", reponduLe:null,
+        createdAt: Timestamp.now(),
+        // Le client ne peut plus répondre à partir du jour du dernier créneau
+        expireLe: Timestamp.fromDate(new Date(`${creneaux[creneaux.length-1].date}T00:00:00-04:00`)),
+        clientNom: form.clientNom, clientPrenom: form.clientPrenom || "", techNom: form.techNom,
+      };
+      const batch = writeBatch(db);
+      batch.set(doc(db,"rdvPropositions",token,"prive","bon"), { ...infosBon, createdAt: Timestamp.now() });
+      batch.set(doc(db,"rdvPropositions",token), publique);
+      await batch.commit();
+      setPropEnvoi({ texte: messageProposition(publique, token), tel: form.clientTel });
+      setFormStep(null); setForm({});
+      await fetchData();
+    } catch(e) {
+      console.error("Erreur création proposition:", e);
+      setPropErreur("La proposition n'a pas pu être créée : " + (e?.message || "vérifiez les règles Firestore de la collection 'rdvPropositions'"));
+    }
+    setSaving(false);
+  };
+
+  const annulerProposition = async (p) => {
+    try {
+      await updateDoc(doc(db,"rdvPropositions",p.id), { statut:"annulé" });
+      setSelectedProp(null);
+      await fetchData();
+    } catch(e) { setPropErreur("Annulation impossible : " + (e?.message || "")); }
+  };
+
+  // Après l'appel au client : ouvre le formulaire de bon, prérempli avec ses infos et le créneau choisi
+  const creerBonDepuisProposition = (p) => {
+    const { createdAt, ...infosBon } = propPrive || {};
+    const c = p.choix !== null && p.choix !== undefined ? p.creneaux[p.choix] : null;
+    setForm({
+      ...infosBon,
+      entreprise: infosBon.entreprise || COCON,
+      datePrevue: c ? c.date : "", dateFinPrevue: "",
+      horaires: c ? { [c.date]: { debut:c.debut, fin:c.fin } } : {},
+      propositionToken: p.id,
+    });
+    setSelectedProp(null);
+    setFormStep(1);
   };
 
   // ── WhatsApp (messages groupés planning) ─────────────────────────────────
@@ -530,6 +687,108 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     background:"var(--color-background-primary)", color:"var(--color-text-primary)",
   };
 
+  // Collaborateur, type, retouche : commun au bon et à la proposition de créneaux
+  const carteIntervention = (
+    <div className="card">
+      <div className="card-title">Intervention</div>
+      <div className="field"><label>Collaborateur *</label>
+        <select style={selectStyle} value={form.techNom||""} onChange={e=>setForm(f=>({...f,techNom:e.target.value}))}>
+          <option value="">Choisir…</option>
+          {techList.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div className="field"><label>Type d'intervention *</label>
+        <select style={selectStyle} value={form.type||""} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+          <option value="">Choisir un type…</option>
+          {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderTop:"0.5px solid var(--color-border-tertiary)",marginTop:4}}>
+        <input type="checkbox" id="planIsRetouche" checked={!!form.isRetouche} onChange={e=>setForm(f=>({...f,isRetouche:e.target.checked}))} style={{width:16,height:16,accentColor:"#E8845C",cursor:"pointer"}}/>
+        <label htmlFor="planIsRetouche" style={{fontSize:13,fontWeight:500,color:"#E8845C",cursor:"pointer"}}>🔧 Retouche (retour sur intervention précédente)</label>
+      </div>
+    </div>
+  );
+
+  // ── ÉTAPE 1 : PROPOSITION DE CRÉNEAUX ─────────────────────────────────────
+  if (formStep === 1 && form.mode === "proposition") {
+    const creneaux = form.creneaux || [];
+    const demain = fmtDate(new Date(Date.now() + 86400000));
+    const creneauxOk = creneaux.length > 0 && creneaux.every(c => c.date >= demain && c.debut && c.fin && c.fin > c.debut);
+    const canGoNext = creneauxOk && form.techNom && form.type;
+
+    const majCreneau = (i, champ, valeur) => setForm(f => ({
+      ...f,
+      creneaux: f.creneaux.map((c, j) => {
+        if (j !== i) return c;
+        const maj = { ...c, [champ]: valeur };
+        if (champ === "debut" && (!maj.fin || maj.fin <= valeur)) maj.fin = defaultHeureFinPrevue(valeur);
+        return maj;
+      }),
+    }));
+    const ajouterCreneau = () => setForm(f => {
+      const dernier = f.creneaux[f.creneaux.length - 1] || { debut:"08:00", fin:"10:00" };
+      return { ...f, creneaux: [...f.creneaux, { date:"", debut:dernier.debut, fin:dernier.fin }] };
+    });
+    const retirerCreneau = (i) => setForm(f => ({ ...f, creneaux: f.creneaux.filter((_, j) => j !== i) }));
+
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={()=>{ setFormStep(null); setForm({}); }}>← Retour</button>
+          <h2>Proposer des créneaux</h2>
+          <span style={{fontSize:11,color:"var(--color-text-secondary)",background:"var(--color-background-secondary)",padding:"3px 10px",borderRadius:20}}>Étape 1 / 2</span>
+        </div>
+        <div className="card" style={{borderLeft:isTermitiles(form)?`4px solid ${TERMITILES_BLUE}`:undefined}}>
+          <div className="card-title">Attribuée à</div>
+          <EntrepriseToggle value={form.entreprise} onChange={e=>setForm(f=>({...f,entreprise:e}))} />
+        </div>
+        <div className="card">
+          <div className="card-title">Créneaux proposés au client</div>
+          <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:6}}>
+            {MAX_CRENEAUX} créneaux maximum, à partir de demain. Le client choisit celui qui lui convient, puis vous le rappelez pour confirmer.
+          </p>
+          {creneaux.map((c, i) => {
+            const occ = occupations(c);
+            return (
+              <div key={i} style={{padding:"10px 0",borderBottom:i<creneaux.length-1?"0.5px solid var(--color-border-tertiary)":"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <p style={{fontSize:12,fontWeight:600,color:"var(--color-text-primary)",textTransform:"capitalize"}}>
+                    Créneau {i+1}{c.date ? ` — ${fmtDayShort(c.date)}` : ""}
+                  </p>
+                  {creneaux.length > 1 && (
+                    <button type="button" onClick={()=>retirerCreneau(i)} style={{background:"none",border:"none",color:"#e74c3c",cursor:"pointer",fontSize:12}}>✕ Retirer</button>
+                  )}
+                </div>
+                <div className="field"><label>Date *</label>
+                  <input type="date" min={demain} value={c.date} onChange={e=>majCreneau(i,"date",e.target.value)} />
+                </div>
+                <div className="row2">
+                  <div className="field" style={{marginBottom:0}}><label>Heure de début *</label>
+                    <input type="time" value={c.debut} onChange={e=>majCreneau(i,"debut",e.target.value)} />
+                  </div>
+                  <div className="field" style={{marginBottom:0}}><label>Heure de fin *</label>
+                    <input type="time" value={c.fin} min={c.debut} onChange={e=>majCreneau(i,"fin",e.target.value)} />
+                  </div>
+                </div>
+                {occ.length > 0 && (
+                  <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>⚠️ Déjà prévu sur ce créneau : {occ.join(" · ")}</p>
+                )}
+              </div>
+            );
+          })}
+          {creneaux.length < MAX_CRENEAUX && (
+            <button type="button" className="btn-outline" style={{width:"100%",marginTop:10}} onClick={ajouterCreneau}>+ Ajouter un créneau</button>
+          )}
+        </div>
+        {carteIntervention}
+        <button className="btn-primary" style={{width:"100%",opacity:canGoNext?1:0.4}} disabled={!canGoNext} onClick={()=>setFormStep(2)}>
+          Suivant — Informations client →
+        </button>
+      </div>
+    );
+  }
+
   // ── ÉTAPE 1 ───────────────────────────────────────────────────────────────
   if (formStep === 1) {
     const joursForm = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
@@ -600,25 +859,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           </div>
         )}
 
-        <div className="card">
-          <div className="card-title">Intervention</div>
-          <div className="field"><label>Collaborateur *</label>
-            <select style={selectStyle} value={form.techNom||""} onChange={e=>setForm(f=>({...f,techNom:e.target.value}))}>
-              <option value="">Choisir…</option>
-              {techList.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="field"><label>Type d'intervention *</label>
-            <select style={selectStyle} value={form.type||""} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
-              <option value="">Choisir un type…</option>
-              {TYPES_INTERVENTION.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderTop:"0.5px solid var(--color-border-tertiary)",marginTop:4}}>
-            <input type="checkbox" id="planIsRetouche" checked={!!form.isRetouche} onChange={e=>setForm(f=>({...f,isRetouche:e.target.checked}))} style={{width:16,height:16,accentColor:"#E8845C",cursor:"pointer"}}/>
-            <label htmlFor="planIsRetouche" style={{fontSize:13,fontWeight:500,color:"#E8845C",cursor:"pointer"}}>🔧 Retouche (retour sur intervention précédente)</label>
-          </div>
-        </div>
+        {carteIntervention}
         <button className="btn-primary" style={{width:"100%",opacity:canGoNext?1:0.4}} disabled={!canGoNext} onClick={()=>setFormStep(2)}>
           Suivant — Informations client →
         </button>
@@ -628,7 +869,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   // ── ÉTAPE 2 ───────────────────────────────────────────────────────────────
   if (formStep === 2) {
-    const canSubmit = form.clientNom && form.adresseIntervention;
+    const estProposition = form.mode === "proposition";
+    const canSubmit = form.clientNom && form.adresseIntervention && (!estProposition || form.clientTel);
     const joursRecap = getDateRange(form.datePrevue, form.dateFinPrevue || form.datePrevue);
     const dateLabel = new Date(form.datePrevue+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
     return (
@@ -640,7 +882,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
         <div className="card readonly" style={{marginBottom:12}}>
           <div className="card-title">Récapitulatif <span className="locked-badge">🔒 Étape 1</span></div>
-          {joursRecap.length > 1 ? (
+          {estProposition ? (
+            form.creneaux.map((c,i) => (
+              <div className="info-row" key={i}><span style={{textTransform:"capitalize"}}>Créneau {i+1} · {fmtDayShort(c.date)}</span><b>{c.debut} → {c.fin}</b></div>
+            ))
+          ) : joursRecap.length > 1 ? (
             <>
               <div className="info-row"><span>Durée</span><b>{joursRecap.length} jours → {joursRecap.length} bons liés (J1…J{joursRecap.length})</b></div>
               {joursRecap.map((d,i) => (
@@ -664,7 +910,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             <div className="field"><label>Prénom</label><input value={form.clientPrenom||""} onChange={e=>setForm(f=>({...f,clientPrenom:e.target.value}))} /></div>
           </div>
           <div className="row2">
-            <div className="field"><label>Téléphone</label><input type="tel" value={form.clientTel||""} onChange={e=>setForm(f=>({...f,clientTel:e.target.value}))} /></div>
+            <div className="field"><label>Téléphone{estProposition ? " * (WhatsApp)" : ""}</label><input type="tel" value={form.clientTel||""} onChange={e=>setForm(f=>({...f,clientTel:e.target.value}))} /></div>
             <div className="field"><label>Email</label><input type="email" value={form.clientEmail||""} onChange={e=>setForm(f=>({...f,clientEmail:e.target.value}))} /></div>
           </div>
           <div className="field"><label>Adresse facturation</label>
@@ -690,9 +936,122 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             <textarea value={form.demandeClient||""} onChange={e=>setForm(f=>({...f,demandeClient:e.target.value}))} placeholder="Contexte, motif…" rows={3} />
           </div>
         </div>
-        <button className="btn-primary" style={{width:"100%",marginBottom:32,opacity:canSubmit?1:0.4}} disabled={saving||!canSubmit} onClick={createBon}>
-          {saving?"Création…":"✅ Créer le bon d'intervention"}
+        {propErreur && estProposition && (
+          <p style={{color:"#e74c3c",fontSize:12,marginBottom:10,padding:"8px 12px",background:"#fdecea",borderRadius:8,lineHeight:1.5}}>⚠️ {propErreur}</p>
+        )}
+        <button className="btn-primary" style={{width:"100%",marginBottom:32,opacity:canSubmit?1:0.4}} disabled={saving||!canSubmit} onClick={estProposition ? createProposition : createBon}>
+          {saving ? "Création…" : estProposition ? "🗓️ Créer la proposition" : "✅ Créer le bon d'intervention"}
         </button>
+      </div>
+    );
+  }
+
+  // ── MESSAGE DE PROPOSITION À ENVOYER AU CLIENT ────────────────────────────
+  if (propEnvoi) {
+    const urlWa = `https://web.whatsapp.com/send?phone=${formatTelWa(propEnvoi.tel)}&text=${encodeURIComponent(propEnvoi.texte)}`;
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setPropEnvoi(null)}>← Planning</button>
+          <h2>Message au client</h2>
+        </div>
+        <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12}}>
+          Envoyez ce message au client sur WhatsApp. Son choix apparaîtra dans le planning (📞 à confirmer).
+        </p>
+        <div style={{background:"#e9f5e9",border:"0.5px solid #c3e6cb",borderRadius:12,padding:"14px",marginBottom:14,fontSize:13,lineHeight:1.6,color:"#1a1a1a",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+          {propEnvoi.texte}
+        </div>
+        <button onClick={() => window.open(urlWa, "_blank")}
+          style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+          💬 Ouvrir WhatsApp ({propEnvoi.tel})
+        </button>
+        <button className="btn-outline" style={{width:"100%",marginBottom:10}} onClick={() => copierTexte(propEnvoi.texte, "message")}>
+          {copie === "message" ? "✅ Message copié" : "📋 Copier le message"}
+        </button>
+        <button className="btn-outline" style={{width:"100%"}} onClick={() => setPropEnvoi(null)}>← Retour au planning</button>
+      </div>
+    );
+  }
+
+  // ── PANNEAU PROPOSITION DE CRÉNEAUX ───────────────────────────────────────
+  if (selectedProp) {
+    const p = selectedProp;
+    const choisi = p.choix !== null && p.choix !== undefined ? p.creneaux[p.choix] : null;
+    const tel = propPrive?.clientTel || "";
+    const statutProp = {
+      "en attente": { label:"⏳ En attente du client", bg:"#fbf3dc", color:"#8a6d1f" },
+      "choisi":     { label:"📞 À confirmer par téléphone", bg:"#fff4e6", color:PROP_COULEUR },
+      "aucun":      { label:"❌ Aucun créneau ne convient", bg:"#fdebd0", color:"#a04000" },
+    }[p.statut] || { label:p.statut, bg:"#eee", color:"#555" };
+    return (
+      <div className="container">
+        <div className="page-header">
+          <button className="btn-back" onClick={() => setSelectedProp(null)}>← Retour</button>
+          <h2>Proposition de créneaux</h2>
+          <span className="badge" style={{background:statutProp.bg,color:statutProp.color}}>{statutProp.label}</span>
+        </div>
+
+        <div className="card" style={{marginBottom:12}}>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--color-text-primary)",marginBottom:2}}>{p.clientNom} {p.clientPrenom}</div>
+          {propPrive?.clientSociete && <div style={{fontSize:11,color:"#35B499",fontWeight:600,marginBottom:2}}>{propPrive.clientSociete}</div>}
+          <div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:8}}>{p.type} · {p.techNom}</div>
+          <div className="info-row"><span>Téléphone</span>
+            <b>{tel ? <a href={`tel:${tel.replace(/\s/g,"")}`} style={{color:"#35B499",textDecoration:"none"}}>📞 {tel}</a> : (propPrive ? "—" : "…")}</b>
+          </div>
+          {p.adresse && <div className="info-row"><span>Adresse</span><b>{p.adresse}</b></div>}
+          {propPrive?.numDevis && <div className="info-row"><span>N° Devis</span><b>{propPrive.numDevis}</b></div>}
+          <div className="info-row"><span>Envoyée le</span><b>{fmtTimestamp(p.createdAt)}</b></div>
+          {p.reponduLe && <div className="info-row"><span>Réponse du client</span><b>{fmtTimestamp(p.reponduLe)}</b></div>}
+        </div>
+
+        <div className="card" style={{marginBottom:12}}>
+          <div className="card-title">Créneaux proposés</div>
+          {p.creneaux.map((c, i) => {
+            const estChoisi = p.choix === i;
+            return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:6,borderRadius:8,
+                background:estChoisi?"#fff4e6":"var(--color-background-secondary)",border:estChoisi?`1.5px solid ${PROP_COULEUR}`:"0.5px solid transparent"}}>
+                <span style={{fontSize:13,textTransform:"capitalize",color:"var(--color-text-primary)",fontWeight:estChoisi?700:400}}>{fmtDayShort(c.date)} · {c.debut} → {c.fin}</span>
+                {estChoisi && <span style={{fontSize:11,fontWeight:700,color:PROP_COULEUR}}>✅ Choisi par le client</span>}
+              </div>
+            );
+          })}
+          {p.statut === "aucun" && (
+            <p style={{fontSize:12,color:"#a04000",marginTop:6}}>
+              Le client n'a retenu aucun créneau{p.commentaireClient ? <> : <i>« {p.commentaireClient} »</i></> : "."}
+            </p>
+          )}
+        </div>
+
+        {propErreur && <p style={{color:"#e74c3c",fontSize:12,marginBottom:10}}>⚠️ {propErreur}</p>}
+
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {p.statut !== "en attente" && (
+            <p style={{fontSize:12,color:"var(--color-text-secondary)",margin:0}}>
+              {choisi ? "Appelez le client pour confirmer ce créneau, puis créez le bon." : "Appelez le client pour convenir d'une date, puis créez le bon."}
+            </p>
+          )}
+          <button className="btn-primary" disabled={!propPrive} onClick={() => creerBonDepuisProposition(p)}>
+            {choisi ? "✅ Confirmé avec le client : créer le bon" : "📋 Créer le bon (date convenue par téléphone)"}
+          </button>
+          {p.statut === "en attente" && tel && (
+            <button className="btn-outline" onClick={() => setPropEnvoi({ texte: messageProposition(p, p.id), tel })}>
+              💬 Renvoyer le message au client
+            </button>
+          )}
+          {!annulConfirm ? (
+            <button className="btn-outline" style={{color:"#c0392b"}} onClick={() => setAnnulConfirm(true)}>
+              Annuler la proposition
+            </button>
+          ) : (
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn-outline" style={{flex:1}} onClick={() => setAnnulConfirm(false)}>Garder</button>
+              <button className="btn-outline" style={{flex:1,color:"white",background:"#c0392b",border:"none"}} onClick={() => annulerProposition(p)}>
+                Confirmer l'annulation
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -1107,6 +1466,36 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                     </div>
                   ))}
 
+                  {/* Créneaux proposés aux clients (admin) : hachurés tant que le client n'a pas choisi */}
+                  {isAdmin && propositions
+                    .flatMap(p => (p.creneaux||[]).map((c, i) => ({ p, c, i })))
+                    .filter(({ p, c, i }) => c.date === dateStr && (p.statut === "en attente" || (p.statut === "choisi" && p.choix === i)))
+                    .map(({ p, c, i }) => {
+                      const choisi = p.statut === "choisi";
+                      const blockH = Math.max(28, getDurationHours(c.debut, c.fin) * CELL_HEIGHT - 4);
+                      // Un bon occupe déjà ce créneau : la proposition passe sur la moitié droite pour rester visible
+                      const surBon = dayBons.some(b => b.datePrevue === dateStr && b.heurePrevue < c.fin
+                        && (b.heureFinPrevue || defaultHeureFinPrevue(b.heurePrevue)) > c.debut);
+                      return (
+                        <div key={`${p.id}-${i}`}
+                          onClick={e => { e.stopPropagation(); ouvrirProposition(p); }}
+                          style={{
+                            position:"absolute", top:getTopOffset(c.debut) + 2, left:surBon ? "52%" : 3, right:3, height:blockH,
+                            background: choisi ? "#fff4e6" : "repeating-linear-gradient(45deg,#faf6f0,#faf6f0 6px,#f1e8dc 6px,#f1e8dc 12px)",
+                            border: choisi ? `1.5px solid ${PROP_COULEUR}` : "1.5px dashed #c9b49c",
+                            borderRadius:6, padding:"4px 6px", fontSize:10, lineHeight:1.4,
+                            overflow:"hidden", cursor:"pointer", zIndex: surBon ? 3 : choisi ? 2 : 1,
+                          }}>
+                          <div style={{fontWeight:700,color:PROP_COULEUR,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {choisi ? "📞 À confirmer" : `🗓️ Proposé ${i+1}/${p.creneaux.length}`}
+                          </div>
+                          <div style={{color:"var(--color-text-primary)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {c.debut} → {c.fin} · {p.clientNom} {p.clientPrenom}
+                          </div>
+                        </div>
+                      );
+                    })}
+
                   {/* Bons positionnés absolument selon heure */}
                   {dayBons.map(b => {
                     const ville      = extractVille(b.adresseIntervention||b.clientAdresse||"");
@@ -1218,6 +1607,11 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
             </button>
           )}
           {isAdmin && (
+            <button className="btn-outline" style={{padding:"9px 14px",fontSize:13,width:"auto"}} onClick={handleProposerButton}>
+              🗓️ Proposer
+            </button>
+          )}
+          {isAdmin && (
             <button className="btn-primary" style={{padding:"9px 18px",fontSize:13}} onClick={handleAddButton}>
               + Ajouter
             </button>
@@ -1275,6 +1669,9 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div style={{width:10,height:10,borderRadius:3,background:TERMITILES_BLUE}}/>
           <span style={{fontSize:11,color:TERMITILES_BLUE,fontWeight:600}}>Termit'iles</span>
         </div>
+        {isAdmin && (
+          <span style={{fontSize:11,color:PROP_COULEUR}}>🗓️ Proposé au client · 📞 Choisi, à confirmer</span>
+        )}
         {onOpenBon && (
           <span style={{fontSize:10,color:"var(--color-text-secondary)",marginLeft:"auto",fontStyle:"italic"}}>
             Cliquez sur un bon pour l'ouvrir
@@ -1284,6 +1681,32 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
       {loading && <p style={{textAlign:"center",color:"var(--color-text-secondary)",fontSize:13,padding:"2rem 0"}}>Chargement…</p>}
       {!loading && <WeekGrid days={week1} label={weekLabel} />}
+
+      {isAdmin && !loading && propositions.length > 0 && (
+        <div className="card" style={{marginTop:8}}>
+          <div className="card-title">Propositions de créneaux en cours ({propositions.length})</div>
+          {[...propositions]
+            .sort((a,b) => ["choisi","aucun","en attente"].indexOf(a.statut) - ["choisi","aucun","en attente"].indexOf(b.statut))
+            .map(p => {
+              const c = p.statut === "choisi" ? p.creneaux[p.choix] : null;
+              const ligne = p.statut === "choisi" ? `📞 A choisi le ${fmtDayShort(c.date)} · ${c.debut} → ${c.fin} : à rappeler pour confirmer`
+                : p.statut === "aucun" ? "❌ Aucun créneau ne convient : à rappeler"
+                : `⏳ ${p.creneaux.length} créneau${p.creneaux.length>1?"x":""} proposé${p.creneaux.length>1?"s":""}, en attente du client`;
+              return (
+                <div key={p.id} onClick={() => ouvrirProposition(p)}
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+                  <div style={{minWidth:0}}>
+                    <p style={{fontSize:13,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>
+                      {p.clientNom} {p.clientPrenom} <span style={{fontWeight:400,color:"var(--color-text-secondary)"}}>· {p.type}</span>
+                    </p>
+                    <p style={{fontSize:11,color:p.statut==="en attente"?"var(--color-text-secondary)":p.statut==="choisi"?PROP_COULEUR:"#a04000",fontWeight:p.statut==="en attente"?400:600}}>{ligne}</p>
+                  </div>
+                  <span style={{color:"#35B499",fontSize:16,flexShrink:0}}>→</span>
+                </div>
+              );
+            })}
+        </div>
+      )}
 
       {isAdmin && !loading && (
         <div style={{marginTop:8,paddingTop:16,borderTop:"0.5px solid var(--color-border-tertiary)"}}>
