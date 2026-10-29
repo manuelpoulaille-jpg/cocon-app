@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
+import { localiserAdresse, distanceKm, BASE_COCON } from "../geoMartinique";
 import {
   collection, getDocs, getDoc, addDoc, deleteDoc, doc, updateDoc, writeBatch, Timestamp,
 } from "firebase/firestore";
@@ -137,6 +138,15 @@ const DUREE_DEFAUT = 120;
 // Journée de travail des équipes
 const JOURNEE_DEBUT = "07:30";
 const JOURNEE_FIN   = "14:00";
+const JOURS_TRAVAILLES = [1, 2, 3, 4, 5]; // lundi → vendredi
+const HORIZON_SUGGESTIONS = 21;           // jours examinés pour les suggestions
+
+// Arrondit une heure "HH:MM" au quart d'heure (supérieur ou inférieur)
+const arrondir15 = (heure, versLeHaut) => {
+  const [h, m] = heure.split(":").map(Number);
+  const t = versLeHaut ? Math.ceil((h * 60 + m) / 15) * 15 : Math.floor((h * 60 + m) / 15) * 15;
+  return `${String(Math.floor(t / 60)).padStart(2,"0")}:${String(t % 60).padStart(2,"0")}`;
+};
 const DUREES_CHOIX = [30, 60, 90, 120, 180, 240, 300, 360, 480];
 
 // Interventions longues : on essaie d'en faire une seule par jour et par famille
@@ -213,6 +223,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [waCopied, setWaCopied] = useState(false);
   const [propositions, setPropositions] = useState([]);   // rdvPropositions encore ouvertes (admin)
   const [selectedProp, setSelectedProp] = useState(null);
+  const [suggestions, setSuggestions]   = useState(null);  // créneaux suggérés selon la localisation
   const [propPrive, setPropPrive]       = useState(null);  // infos client de la proposition ouverte
   const [propEnvoi, setPropEnvoi]       = useState(null);  // { texte, tel } : message à envoyer au client
   const [propErreur, setPropErreur]     = useState("");
@@ -286,6 +297,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
 
   const handleProposerButton = () => {
     setPropErreur("");
+    setSuggestions(null);
     setForm({ mode:"proposition", entreprise:COCON, dureeMinutes:DUREE_DEFAUT,
       creneaux:[{ date:"", debut:JOURNEE_DEBUT, fin:ajouterMinutes(JOURNEE_DEBUT, DUREE_DEFAUT) }] });
     setFormStep(1);
@@ -313,6 +325,77 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         .map(p => `${p.clientNom} (${p.type}, proposé)`),
     ];
     return { chevauchements, memeJour };
+  };
+
+  // ── Optimisation des trajets (propositions de créneaux) ──────────────────
+
+  // Ce qui occupe l'équipe concernée ce jour-là (bons + créneaux proposés), trié par heure
+  const tourneeDuJour = (date, techNom) => {
+    const concerne = (t) => techNom === "Equipe" || !t || t === techNom || t === "Equipe";
+    return [
+      ...tousBons
+        .filter(b => b.datePrevue === date && !isTermitiles(b) && concerne(b.techNom))
+        .map(b => ({ debut:b.heurePrevue, fin:b.heureFinPrevue || defaultHeureFinPrevue(b.heurePrevue), nom:b.clientNom,
+          type:b.type, isRetouche:b.isRetouche, lieu:localiserAdresse(b.adresseIntervention || b.clientAdresse) })),
+      ...propositions
+        .flatMap(p => (p.creneaux||[]).map((x, i) => ({ p, x, i })))
+        .filter(({ p, x, i }) => x.date === date && (p.statut === "en attente" || p.choix === i) && concerne(p.techNom))
+        .map(({ p, x }) => ({ debut:x.debut, fin:x.fin, nom:`${p.clientNom} (proposé)`, type:p.type, lieu:localiserAdresse(p.adresse) })),
+    ].filter(o => o.debut).sort((a, b) => a.debut.localeCompare(b.debut));
+  };
+
+  // Kilomètres ajoutés à la tournée en plaçant le client entre l'intervention d'avant et celle d'après
+  // (départ et retour au siège quand il n'y a rien avant ou après)
+  const detour = (lieuClient, date, debut, fin, techNom) => {
+    const tournee = tourneeDuJour(date, techNom).filter(o => o.lieu);
+    const avant = [...tournee].reverse().find(o => o.fin <= debut);
+    const apres = tournee.find(o => o.debut >= fin);
+    const a = avant ? avant.lieu : BASE_COCON, b = apres ? apres.lieu : BASE_COCON;
+    const km = distanceKm(a, lieuClient) + distanceKm(lieuClient, b) - distanceKm(a, b);
+    return { km: Math.max(0, Math.round(km)), avant, apres };
+  };
+
+  const libelleDetour = (km) => km <= 1 ? "sur le trajet" : `détour ≈ ${km} km`;
+
+  const raisonTrajet = (s) => {
+    const lieu = (o) => o.lieu ? ` à ${o.lieu.commune}` : "";
+    if (!s.avant && !s.apres) return "Journée libre : aller-retour depuis le siège";
+    return [
+      s.avant && `après ${s.avant.nom}${lieu(s.avant)} (fin ${fmtHeure(s.avant.fin)})`,
+      s.apres && `avant ${s.apres.nom}${lieu(s.apres)} (${fmtHeure(s.apres.debut)})`,
+    ].filter(Boolean).join(", ").replace(/^./, c => c.toUpperCase());
+  };
+
+  // Meilleur créneau de chaque jour ouvré à venir (le moins de détour), les 5 meilleurs jours
+  const suggererCreneaux = (f) => {
+    const lieuClient = localiserAdresse(f.adresseIntervention);
+    if (!lieuClient || !f.type || !f.techNom) return [];
+    const duree = f.dureeMinutes || DUREE_DEFAUT;
+    const famille = familleDuType(f.type);
+    const datesPrises = new Set((f.creneaux || []).map(c => c.date).filter(Boolean));
+    const parJour = [];
+    for (let n = 1; n <= HORIZON_SUGGESTIONS; n++) {
+      const date = fmtDate(new Date(Date.now() + n * 86400000));
+      if (!JOURS_TRAVAILLES.includes(new Date(date + "T12:00:00").getDay()) || datesPrises.has(date)) continue;
+      if (f.techNom !== "Equipe" && indispos.some(i => i.techNom === f.techNom && i.dateDebut <= date && i.dateFin >= date)) continue;
+      const tournee = tourneeDuJour(date, f.techNom);
+      if (famille && tournee.some(o => !o.isRetouche && famille.includes(o.type))) continue;
+      // Trous libres dans la journée de travail
+      const trous = [];
+      let curseur = JOURNEE_DEBUT;
+      tournee.forEach(o => { if (o.debut > curseur) trous.push([curseur, o.debut]); if (o.fin > curseur) curseur = o.fin; });
+      if (curseur < JOURNEE_FIN) trous.push([curseur, JOURNEE_FIN]);
+      const candidats = trous.map(([libreDe, libreA]) => {
+        // En début de journée, on arrive juste à temps pour enchaîner avec l'intervention suivante ; sinon juste après la précédente
+        let debut = libreDe === JOURNEE_DEBUT && libreA !== JOURNEE_FIN
+          ? arrondir15(retirerMinutes(libreA, duree), false) : arrondir15(libreDe, true);
+        if (debut < JOURNEE_DEBUT) debut = JOURNEE_DEBUT;
+        const fin = ajouterMinutes(debut, duree);
+        return fin <= libreA ? { date, debut, fin, ...detour(lieuClient, date, debut, fin, f.techNom) } : null;
+      }).filter(Boolean);
+      if (candidats.length) parJour.push(candidats.sort((a, b) => a.km - b.km)[0]);
+    }
+    return parJour.sort((a, b) => a.km - b.km || a.date.localeCompare(b.date)).slice(0, 5);
   };
 
   const ouvrirProposition = async (p) => {
@@ -800,6 +883,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     const choixDurees = [...new Set([...DUREES_CHOIX, duree])].sort((a,b) => a - b);
     const arriveeMax = retirerMinutes(JOURNEE_FIN, duree); // pour finir avant la fin de journée
     const retirerCreneau = (i) => setForm(f => ({ ...f, creneaux: f.creneaux.filter((_, j) => j !== i) }));
+    const lieuClient = localiserAdresse(form.adresseIntervention);
+    const peutSuggerer = lieuClient && form.type && form.techNom;
+    const remplis = creneaux.filter(c => c.date);
+    const ajouterSuggestion = (sug) => setForm(f => {
+      const deja = f.creneaux.filter(c => c.date);
+      if (deja.length >= MAX_CRENEAUX || deja.some(c => c.date === sug.date)) return f;
+      return { ...f, creneaux: [...deja, { date:sug.date, debut:sug.debut, fin:sug.fin }] };
+    });
 
     return (
       <div className="container">
@@ -812,6 +903,17 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <div className="card-title">Attribuée à</div>
           <EntrepriseToggle value={form.entreprise} onChange={e=>setForm(f=>({...f,entreprise:e}))} />
         </div>
+        <div className="card">
+          <div className="card-title">Lieu de l'intervention</div>
+          <div className="field" style={{marginBottom:4}}><label>Adresse d'intervention, avec le code postal</label>
+            <input value={form.adresseIntervention||""} onChange={e=>setForm(f=>({...f,adresseIntervention:e.target.value}))} placeholder="12 rue des Fleurs, 97200 Fort-de-France" />
+          </div>
+          {form.adresseIntervention && (
+            <p style={{fontSize:11,color:lieuClient?"#1a7a65":"#a04000",fontWeight:600}}>
+              {lieuClient ? `📍 ${lieuClient.commune}` : "⚠️ Commune non reconnue : ajoutez le code postal (972…) pour optimiser les trajets."}
+            </p>
+          )}
+        </div>
         {carteIntervention}
         <div className="card">
           <div className="card-title">Créneaux proposés au client</div>
@@ -823,6 +925,38 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
               {choixDurees.map(m => <option key={m} value={m}>{fmtDuree(m)}{m === DUREES_TYPE[form.type] ? " (habituel)" : ""}</option>)}
             </select>
           </div>
+
+          {/* Suggestions selon la localisation : les jours où l'équipe passe déjà près du client */}
+          <button type="button" className="btn-outline" style={{width:"100%",marginBottom:6,opacity:peutSuggerer?1:0.5}}
+            disabled={!peutSuggerer} onClick={() => setSuggestions(suggererCreneaux(form))}>
+            ✨ Suggérer les créneaux les plus proches
+          </button>
+          {!peutSuggerer && (
+            <p style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:8}}>Renseignez l'adresse, le collaborateur et le type pour obtenir des suggestions.</p>
+          )}
+          {suggestions && (
+            <div style={{background:"#f0f9f6",border:"0.5px solid #a0dece",borderRadius:8,padding:"6px 10px",marginBottom:10}}>
+              {suggestions.length === 0 ? (
+                <p style={{fontSize:12,color:"var(--color-text-secondary)",padding:"6px 0"}}>Aucun créneau libre trouvé sur les {HORIZON_SUGGESTIONS} prochains jours.</p>
+              ) : suggestions.map((sug, k) => {
+                const dejaAjoute = remplis.some(c => c.date === sug.date);
+                return (
+                  <div key={sug.date} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:k<suggestions.length-1?"0.5px solid #cfe9e1":"none"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <p style={{fontSize:12,fontWeight:700,color:"var(--color-text-primary)"}}>
+                        <span style={{textTransform:"capitalize"}}>{fmtDayShort(sug.date)}</span> à {fmtHeure(sug.debut)} · <span style={{color:sug.km<=10?"#1a7a65":sug.km<=25?"#8a6d1f":"#a04000"}}>{libelleDetour(sug.km)}</span>
+                      </p>
+                      <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>{raisonTrajet(sug)}</p>
+                    </div>
+                    <button type="button" disabled={dejaAjoute || remplis.length >= MAX_CRENEAUX} onClick={() => ajouterSuggestion(sug)}
+                      style={{flexShrink:0,background:dejaAjoute?"#e1f5ee":"white",border:"0.5px solid #a0dece",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,color:"#1a7a65",cursor:dejaAjoute?"default":"pointer"}}>
+                      {dejaAjoute ? "✓ Ajouté" : "+ Ajouter"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {creneaux.map((c, i) => {
             const { chevauchements, memeJour } = occupations(c, form.type);
             return (
@@ -844,6 +978,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
                 <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:4}}>
                   Bloqué dans le planning jusqu'à {c.fin} (environ {fmtDuree(duree)})
                 </p>
+                {lieuClient && c.date && c.debut && (() => {
+                  const d = detour(lieuClient, c.date, c.debut, c.fin, form.techNom);
+                  return (
+                    <p style={{fontSize:11,marginTop:4,color:d.km<=10?"#1a7a65":d.km<=25?"#8a6d1f":"#a04000"}}>
+                      🚗 {libelleDetour(d.km).replace(/^./, x => x.toUpperCase())} · {raisonTrajet(d)}
+                    </p>
+                  );
+                })()}
                 {(c.debut < JOURNEE_DEBUT || c.fin > JOURNEE_FIN) && (
                   <p style={{fontSize:11,color:"#a04000",marginTop:6,lineHeight:1.5}}>
                     ⚠️ Hors de la journée de travail ({fmtHeure(JOURNEE_DEBUT)} – {fmtHeure(JOURNEE_FIN)}){arriveeMax >= JOURNEE_DEBUT ? ` : pour ${fmtDuree(duree)}, arriver au plus tard à ${fmtHeure(arriveeMax)}` : ""}.
