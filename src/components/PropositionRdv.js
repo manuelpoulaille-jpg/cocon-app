@@ -117,7 +117,8 @@ export default function PropositionRdv({ token }) {
 
   const recapIntervention = (
     <div style={{fontSize:14, color:"#444", marginBottom:16, lineHeight:1.6}}>
-      {prop.type && <div>🔧 {prop.type}</div>}
+      {prop.contratRef && <div>🛡️ {prop.contratActif ? "Passage de votre contrat d'entretien" : "Passage d'entretien"}</div>}
+      {(prop.prestationsContrat || prop.type) && <div>🔧 {prop.prestationsContrat || prop.type}</div>}
       {dureeProposition(prop) > 0 && <div>⏱️ Durée : environ {fmtDuree(dureeProposition(prop))}</div>}
       {prop.adresse && <div>📍 {prop.adresse}</div>}
     </div>

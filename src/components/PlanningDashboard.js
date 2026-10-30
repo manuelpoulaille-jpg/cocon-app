@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { localiserAdresse, distanceKm, BASE_COCON } from "../geoMartinique";
-import PrestationsEditor from "./PrestationsEditor";
+import PrestationsEditor, { newPrestation } from "./PrestationsEditor";
 import emailjs from "@emailjs/browser";
 import {
   collection, getDocs, getDoc, addDoc, deleteDoc, doc, updateDoc, writeBatch, Timestamp,
@@ -194,6 +194,19 @@ const EMAILJS_SERVICE              = "service_6ham4ay";
 const EMAILJS_TEMPLATE_PROPOSITION = "template_proposition";
 const EMAILJS_KEY                  = "JPyrwrjE8dQD_dT0a";
 
+// Contrats d'entretien : prestation du contrat → type d'intervention du planning
+const TYPE_DEPUIS_PRESTATION = {
+  "Désinsectisation":"Désinsectisation", "Dératisation":"Dératisation", "Désinfection":"Désinfection",
+  "Traitement anti-termites":"Anti-termites", "Traitement anti-chauves-souris":"Anti-chauves-souris",
+  "Étanchéité de toiture":"Étanchéité",
+};
+
+// Les fiches contrat ont souvent « 0696… / 0596… » : on garde le portable (WhatsApp)
+const telPrincipal = (tel) => {
+  const nums = (tel || "").split(/[/,;]/).map(t => t.trim()).filter(Boolean);
+  return nums.find(t => /^(\+?596|0)6/.test(t.replace(/\s/g, ""))) || nums[0] || "";
+};
+
 // Texte → HTML sûr pour le modèle EmailJS (variables en triple accolades)
 const enHtml = (texte) => (texte || "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
@@ -238,6 +251,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [propPrive, setPropPrive]       = useState(null);  // infos client de la proposition ouverte
   const [propEnvoi, setPropEnvoi]       = useState(null);  // { texte, tel, email, haut, bas, lien, bouton } : message à envoyer au client
   const [emailProp, setEmailProp]       = useState("");    // "", "sending", "sent" ou "error: …"
+  const [contratsProp, setContratsProp] = useState(null);  // contrats d'entretien non résiliés (chargés à la 1re proposition)
   const [propErreur, setPropErreur]     = useState("");
   const [annulConfirm, setAnnulConfirm] = useState(false);
   const [copie, setCopie]               = useState("");
@@ -313,6 +327,41 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setForm({ mode:"proposition", entreprise:COCON, dureeMinutes:DUREE_DEFAUT,
       creneaux:[{ date:"", debut:JOURNEE_DEBUT, fin:ajouterMinutes(JOURNEE_DEBUT, DUREE_DEFAUT) }] });
     setFormStep(1);
+    if (!contratsProp) {
+      getDocs(collection(db,"contrats"))
+        .then(snap => setContratsProp(snap.docs.map(d => ({ id:d.id, ...d.data() }))
+          .filter(c => c.statut !== "résilié")
+          .sort((a,b) => (a.clientNom || "").localeCompare(b.clientNom || ""))))
+        .catch(e => { console.error("Lecture des contrats:", e); setContratsProp([]); });
+    }
+  };
+
+  // Proposition pour un contrat d'entretien : client, adresse, type, prix et prestations repris du contrat
+  const choisirContrat = (id) => {
+    const c = (contratsProp || []).find(x => x.id === id);
+    if (!c) {
+      setForm(f => ({ ...f, contratId:"", contratRef:"", contratActif:false, prestationsContrat:"" }));
+      return;
+    }
+    const prestations = c.prestations || [];
+    const types = prestations.map(p => TYPE_DEPUIS_PRESTATION[p] || "Autre");
+    const minutes = types.length ? Math.max(...types.map(t => DUREES_TYPE[t] || DUREE_DEFAUT)) : DUREE_DEFAUT;
+    setForm(f => avecDuree({
+      ...f,
+      contratId:c.id, contratRef:c.ref || "", contratActif:c.statut === "actif",
+      prestationsContrat:prestations.join(", "),
+      type:types[0] || f.type || "",
+      adresseIntervention:c.adresseIntervention || c.clientAdresse || f.adresseIntervention || "",
+      clientSociete:c.clientResponsable ? c.clientNom : "",
+      clientNom:c.clientResponsable || c.clientNom || "",
+      clientPrenom:"",
+      clientTel:telPrincipal(c.clientTel),
+      clientEmail:c.clientEmail || "",
+      adresseFacturation:c.clientAdresse || "",
+      montantFacture:parseFloat(c.montantTTC) > 0 ? String(c.montantTTC) : "",
+      demandeClient:`Contrat d'entretien ${c.ref || ""} (${c.nbPassages || "?"} passages/an) : ${prestations.join(", ")}`,
+      prestations:prestations.map(p => newPrestation(`${p} — passage d'entretien`)),
+    }, minutes));
   };
 
   // Ce qui gêne un créneau proposé : chevauchements, et intervention longue de la même famille le même jour
@@ -604,10 +653,14 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       const jour = fmtDateLong(c.date);
       return `${plusieurs ? puces[i] : "📅"} ${jour.charAt(0).toUpperCase() + jour.slice(1)} à ${fmtHeure(c.debut)}`;
     }).join("\n");
+    // Contrat actif : « dans le cadre de votre contrat » ; contrat pas encore signé (brouillon) : « entretien régulier »
+    const intro = p.contratRef
+      ? `${p.contratActif ? "Dans le cadre de votre contrat d'entretien" : "Pour votre entretien régulier"}, voici ${plusieurs ? "nos propositions de créneaux" : "notre proposition de créneau"} pour votre prochain passage :\n`
+      : `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`;
     return {
       haut: `Bonjour ${p.salutation},\n\n`
-        + `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`
-        + `🔧 ${p.type}\n⏱️ Durée : environ ${fmtDuree(dureeProposition(p))}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
+        + intro
+        + `🔧 ${p.prestationsContrat || p.type}\n⏱️ Durée : environ ${fmtDuree(dureeProposition(p))}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
         + `${lignes}\n\n`
         + `${plusieurs ? "Choisissez celui qui vous convient le mieux ici" : "Dites-nous s'il vous convient ici"} :`,
       bas: `Nous vous rappellerons ensuite pour confirmer le rendez-vous.\n`
@@ -664,6 +717,9 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         // Le client ne peut plus répondre à partir du jour du dernier créneau
         expireLe: Timestamp.fromDate(new Date(`${creneaux[creneaux.length-1].date}T00:00:00-04:00`)),
         clientNom: form.clientNom, clientPrenom: form.clientPrenom || "", techNom: form.techNom,
+        ...(form.contratId ? {
+          contratRef: form.contratRef, contratActif: !!form.contratActif, prestationsContrat: form.prestationsContrat || "",
+        } : {}),
       };
       const batch = writeBatch(db);
       batch.set(doc(db,"rdvPropositions",token,"prive","bon"), { ...infosBon, createdAt: Timestamp.now() });
@@ -950,6 +1006,21 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         <div className="card" style={{borderLeft:isTermitiles(form)?`4px solid ${TERMITILES_BLUE}`:undefined}}>
           <div className="card-title">Attribuée à</div>
           <EntrepriseToggle value={form.entreprise} onChange={e=>setForm(f=>({...f,entreprise:e}))} />
+        </div>
+        <div className="card">
+          <div className="card-title">Contrat d'entretien (optionnel)</div>
+          <select style={selectStyle} value={form.contratId||""} onChange={e => choisirContrat(e.target.value)}>
+            <option value="">{contratsProp ? "Aucun : intervention ponctuelle" : "Chargement des contrats…"}</option>
+            {(contratsProp||[]).map(c => (
+              <option key={c.id} value={c.id}>{c.clientNom} · {c.ref}{c.statut === "brouillon" ? " (brouillon)" : ""}</option>
+            ))}
+          </select>
+          {form.contratId && (
+            <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:6,lineHeight:1.5}}>
+              Client, adresse, type ({form.prestationsContrat || "—"}), prix et prestations repris du contrat.
+              Le message commencera par « {form.contratActif ? "Dans le cadre de votre contrat d'entretien" : "Pour votre entretien régulier"}, voici nos propositions… ».
+            </p>
+          )}
         </div>
         <div className="card">
           <div className="card-title">Lieu de l'intervention</div>
@@ -1291,6 +1362,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           </div>
           {p.adresse && <div className="info-row"><span>Adresse</span><b>{p.adresse}</b></div>}
           {propPrive?.numDevis && <div className="info-row"><span>N° Devis</span><b>{propPrive.numDevis}</b></div>}
+          {p.contratRef && <div className="info-row"><span>Contrat</span><b>{p.contratRef}{p.contratActif ? "" : " (brouillon)"}</b></div>}
           <div className="info-row"><span>Envoyée le</span><b>{fmtTimestamp(p.createdAt)}</b></div>
           {p.reponduLe && <div className="info-row"><span>Réponse du client</span><b>{fmtTimestamp(p.reponduLe)}</b></div>}
         </div>

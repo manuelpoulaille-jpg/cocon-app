@@ -1,7 +1,7 @@
 import React from "react";
 
 // ── Prestations (lignes du devis à cocher par le technicien) ──────────────────
-const newPrestation=(label)=>({id:"p"+Date.now()+"_"+Math.random().toString(36).slice(2,7),label,done:false,nonRealise:false,motif:""});
+export const newPrestation=(label)=>({id:"p"+Date.now()+"_"+Math.random().toString(36).slice(2,7),label,done:false,nonRealise:false,motif:""});
 
 export default function PrestationsEditor({ prestations, onChange, nonBloquant, onNonBloquantChange }) {
   const [draft,setDraft]=React.useState("");
