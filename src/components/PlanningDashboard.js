@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { localiserAdresse, distanceKm, BASE_COCON } from "../geoMartinique";
 import PrestationsEditor from "./PrestationsEditor";
+import emailjs from "@emailjs/browser";
 import {
   collection, getDocs, getDoc, addDoc, deleteDoc, doc, updateDoc, writeBatch, Timestamp,
 } from "firebase/firestore";
@@ -188,6 +189,15 @@ const avecDuree = (f, minutes) => ({
 const PROP_OUVERTES = ["en attente", "choisi", "aucun"];
 const PROP_COULEUR = "#8B6A4E";
 
+// E-mail de proposition : même compte EmailJS que les comptes rendus, modèle « Proposition de créneaux »
+const EMAILJS_SERVICE              = "service_6ham4ay";
+const EMAILJS_TEMPLATE_PROPOSITION = "template_proposition";
+const EMAILJS_KEY                  = "JPyrwrjE8dQD_dT0a";
+
+// Texte → HTML sûr pour le modèle EmailJS (variables en triple accolades)
+const enHtml = (texte) => (texte || "")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+
 const fmtTimestamp = (ts) => ts?.toDate
   ? ts.toDate().toLocaleString("fr-FR", { timeZone:"America/Martinique", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
   : "";
@@ -226,7 +236,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
   const [selectedProp, setSelectedProp] = useState(null);
   const [suggestions, setSuggestions]   = useState(null);  // créneaux suggérés selon la localisation
   const [propPrive, setPropPrive]       = useState(null);  // infos client de la proposition ouverte
-  const [propEnvoi, setPropEnvoi]       = useState(null);  // { texte, tel } : message à envoyer au client
+  const [propEnvoi, setPropEnvoi]       = useState(null);  // { texte, tel, email, haut, bas, lien, bouton } : message à envoyer au client
+  const [emailProp, setEmailProp]       = useState("");    // "", "sending", "sent" ou "error: …"
   const [propErreur, setPropErreur]     = useState("");
   const [annulConfirm, setAnnulConfirm] = useState(false);
   const [copie, setCopie]               = useState("");
@@ -585,21 +596,54 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
     setTimeout(() => setCopie(""), 3000);
   };
 
-  const messageProposition = (p, token) => {
+  // Texte de la proposition en deux parties, autour du lien (WhatsApp) ou du bouton (e-mail)
+  const partiesProposition = (p) => {
     const plusieurs = p.creneaux.length > 1;
     const puces = ["1️⃣","2️⃣","3️⃣","4️⃣"];
     const lignes = p.creneaux.map((c, i) => {
       const jour = fmtDateLong(c.date);
       return `${plusieurs ? puces[i] : "📅"} ${jour.charAt(0).toUpperCase() + jour.slice(1)} à ${fmtHeure(c.debut)}`;
     }).join("\n");
-    return `Bonjour ${p.salutation},\n\n`
-      + `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`
-      + `🔧 ${p.type}\n⏱️ Durée : environ ${fmtDuree(dureeProposition(p))}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
-      + `${lignes}\n\n`
-      + `${plusieurs ? "Choisissez celui qui vous convient le mieux ici" : "Dites-nous s'il vous convient ici"} :\n`
-      + `👉 ${window.location.origin}/?rdv=${token}\n\n`
-      + `Nous vous rappellerons ensuite pour confirmer le rendez-vous.\n`
-      + `Pour toute question : 0596 73 66 66\nCocon Plus SARL`;
+    return {
+      haut: `Bonjour ${p.salutation},\n\n`
+        + `Cocon+ vous propose ${plusieurs ? "plusieurs créneaux" : "un créneau"} pour votre intervention :\n`
+        + `🔧 ${p.type}\n⏱️ Durée : environ ${fmtDuree(dureeProposition(p))}${p.adresse ? `\n📍 ${p.adresse}` : ""}\n\n`
+        + `${lignes}\n\n`
+        + `${plusieurs ? "Choisissez celui qui vous convient le mieux ici" : "Dites-nous s'il vous convient ici"} :`,
+      bas: `Nous vous rappellerons ensuite pour confirmer le rendez-vous.\n`
+        + `Pour toute question : 0596 73 66 66\nCocon Plus SARL`,
+      bouton: plusieurs ? "Choisir mon créneau" : "Répondre à la proposition",
+    };
+  };
+
+  const lienProposition = (token) => `${window.location.origin}/?rdv=${token}`;
+
+  const messageProposition = (p, token) => {
+    const { haut, bas } = partiesProposition(p);
+    return `${haut}\n👉 ${lienProposition(token)}\n\n${bas}`;
+  };
+
+  // Ouvre l'écran « Message au client » (WhatsApp et/ou e-mail)
+  const preparerEnvoi = (p, token, tel, email) => {
+    setEmailProp("");
+    setPropEnvoi({
+      texte: messageProposition(p, token), tel: tel || "", email: (email || "").trim(),
+      ...partiesProposition(p), lien: lienProposition(token),
+    });
+  };
+
+  const envoyerEmailProposition = async () => {
+    setEmailProp("sending");
+    try {
+      await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE_PROPOSITION, {
+        to_email: propEnvoi.email,
+        message_haut: enHtml(propEnvoi.haut), message_bas: enHtml(propEnvoi.bas),
+        lien: propEnvoi.lien, bouton: propEnvoi.bouton,
+      }, EMAILJS_KEY);
+      setEmailProp("sent");
+    } catch(e) {
+      setEmailProp("error: " + (e?.text || e?.message || JSON.stringify(e)));
+    }
   };
 
   // Enregistre la proposition : partie publique (lue par le client) + partie privée (infos du futur bon)
@@ -625,7 +669,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
       batch.set(doc(db,"rdvPropositions",token,"prive","bon"), { ...infosBon, createdAt: Timestamp.now() });
       batch.set(doc(db,"rdvPropositions",token), publique);
       await batch.commit();
-      setPropEnvoi({ texte: messageProposition(publique, token), tel: form.clientTel });
+      preparerEnvoi(publique, token, form.clientTel, form.clientEmail);
       setFormStep(null); setForm({});
       await fetchData();
     } catch(e) {
@@ -1139,7 +1183,7 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           </div>
           <div className="row2">
             <div className="field"><label>Téléphone{estProposition ? " * (WhatsApp)" : ""}</label><input type="tel" value={form.clientTel||""} onChange={e=>setForm(f=>({...f,clientTel:e.target.value}))} /></div>
-            <div className="field"><label>Email</label><input type="email" value={form.clientEmail||""} onChange={e=>setForm(f=>({...f,clientEmail:e.target.value}))} /></div>
+            <div className="field"><label>Email{estProposition ? " (envoi par e-mail)" : ""}</label><input type="email" value={form.clientEmail||""} onChange={e=>setForm(f=>({...f,clientEmail:e.target.value}))} /></div>
           </div>
           <div className="field"><label>Adresse facturation</label>
             <input value={form.adresseFacturation||""} onChange={e=>setForm(f=>({...f,adresseFacturation:e.target.value}))} />
@@ -1188,15 +1232,30 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <h2>Message au client</h2>
         </div>
         <p style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:12}}>
-          Envoyez ce message au client sur WhatsApp. Son choix apparaîtra dans le planning (📞 à confirmer).
+          Envoyez ce message au client sur WhatsApp (particulier) ou par e-mail (entreprise). Son choix apparaîtra dans le planning (📞 à confirmer).
         </p>
         <div style={{background:"#e9f5e9",border:"0.5px solid #c3e6cb",borderRadius:12,padding:"14px",marginBottom:14,fontSize:13,lineHeight:1.6,color:"#1a1a1a",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
           {propEnvoi.texte}
         </div>
-        <button onClick={() => window.open(urlWa, "_blank")}
-          style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>
-          💬 Ouvrir WhatsApp ({propEnvoi.tel})
-        </button>
+        {propEnvoi.tel && (
+          <button onClick={() => window.open(urlWa, "_blank")}
+            style={{width:"100%",background:"#25D366",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+            💬 Ouvrir WhatsApp ({propEnvoi.tel})
+          </button>
+        )}
+        {propEnvoi.email ? (
+          <>
+            <button onClick={envoyerEmailProposition} disabled={emailProp === "sending" || emailProp === "sent"}
+              style={{width:"100%",background:"#35B499",color:"white",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,opacity:emailProp === "sent" ? 0.6 : 1}}>
+              {emailProp === "sending" ? "Envoi de l'e-mail…" : emailProp === "sent" ? `✅ E-mail envoyé à ${propEnvoi.email}` : `📧 Envoyer par e-mail (${propEnvoi.email})`}
+            </button>
+            {emailProp.startsWith("error") && (
+              <p style={{color:"#e74c3c",fontSize:12,marginTop:-4,marginBottom:10,wordBreak:"break-all"}}>⚠️ E-mail non envoyé : {emailProp.slice(7)}</p>
+            )}
+          </>
+        ) : (
+          <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:10}}>📧 Pas d'adresse e-mail pour ce client : envoi par WhatsApp uniquement.</p>
+        )}
         <button className="btn-outline" style={{width:"100%",marginBottom:10}} onClick={() => copierTexte(propEnvoi.texte, "message")}>
           {copie === "message" ? "✅ Message copié" : "📋 Copier le message"}
         </button>
@@ -1266,8 +1325,8 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
           <button className="btn-primary" disabled={!propPrive} onClick={() => creerBonDepuisProposition(p)}>
             {choisi ? "✅ Confirmé avec le client : créer le bon" : "📋 Créer le bon (date convenue par téléphone)"}
           </button>
-          {p.statut === "en attente" && tel && (
-            <button className="btn-outline" onClick={() => setPropEnvoi({ texte: messageProposition(p, p.id), tel })}>
+          {p.statut === "en attente" && (tel || propPrive?.clientEmail) && (
+            <button className="btn-outline" onClick={() => preparerEnvoi(p, p.id, tel, propPrive?.clientEmail)}>
               💬 Renvoyer le message au client
             </button>
           )}
