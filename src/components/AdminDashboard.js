@@ -490,7 +490,7 @@ export default function AdminDashboard({ user, onLogout }) {
         </div>
         <div className="card" style={{marginBottom:12}}><div className="card-title">Compte rendu</div><div className="info-row"><span>Cocon+</span><b>{selected.obsCocon||"—"}</b></div><div className="info-row"><span>Client</span><b>{selected.obsClient||"—"}</b></div></div>
         {selected.signatureTech&&<div className="card" style={{marginBottom:12}}><div className="card-title">Signatures</div><div className="row2"><div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Collaborateur</p><img src={selected.signatureTech} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>{selected.signatureClient&&<div><p style={{fontSize:12,color:"#888",marginBottom:4}}>Client</p><img src={selected.signatureClient} alt="" style={{border:"1px solid #eee",borderRadius:8,maxWidth:"100%",height:80}}/></div>}</div></div>}
-        {selected.statut==="en cours"&&(
+        {(selected.statut==="en cours"||(selected.statut==="planifié"&&selected.datePrevue<=today))&&(
           <div style={{marginBottom:16,padding:"12px 16px",background:"#fff8f0",border:"0.5px solid #e8c9b8",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div>
               <p style={{fontSize:13,fontWeight:500,color:"#6b4a31",margin:0}}>Clôturer cette intervention côté admin</p>
