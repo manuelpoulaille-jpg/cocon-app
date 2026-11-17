@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, doc, updateDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, getDoc, doc, updateDoc, query, where, Timestamp } from "firebase/firestore";
 import emailjs from "@emailjs/browser";
 import logoBase64 from "../logoBase64";
+import TechPlanning from "./TechPlanning";
 
 const EMAILJS_SERVICE  = "service_6ham4ay";
 const EMAILJS_TEMPLATE = "template_vy44z8h";
@@ -25,6 +26,12 @@ const fmtDateCourt = (dateStr) =>
     ? new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" })
     : "—";
 
+// Comparaison de prénoms sans accents ni majuscules (« Équipe » = « equipe »)
+const normNom = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+// Jour (AAAA-MM-JJ, heure de Martinique) d'un Timestamp Firestore
+const jourMq = (ts) => (ts?.toDate ? ts.toDate().toLocaleDateString("fr-CA", { timeZone: "America/Martinique" }) : "");
+const nomClient = (b) => [b?.clientNom, b?.clientPrenom].filter(Boolean).join(" ");
+
 const extractVille = (adresse) => {
   if (!adresse) return "";
   const match = adresse.match(/972\d{2}\s+([^,\n]+)/i);
@@ -44,23 +51,6 @@ const getTwoWeekRange = () => {
   return { start: fmt(mon), end: fmt(end) };
 };
 
-const getWeekDays = (offset = 0) => {
-  const now  = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Martinique" }));
-  const day  = now.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const mon  = new Date(now);
-  mon.setDate(now.getDate() + diff + offset * 7);
-  mon.setHours(0,0,0,0);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(mon);
-    d.setDate(mon.getDate() + i);
-    return d;
-  });
-};
-
-const fmtDateKey = (d) => d.toLocaleDateString("fr-CA");
-const fmtDayLabel = (d) => d.toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"short" });
-const isToday = (d) => fmtDateKey(d) === todayStr();
 
 const calcDuree = (a, f) => {
   if (!a || !f) return "—";
@@ -114,7 +104,16 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   const canvasRef = useRef(null);
   const drawing   = useRef(false);
 
-  useEffect(() => { fetchAll(); }, [refreshTrigger]);
+  // Prénom du compte : displayName de Firebase Auth, sinon users/{uid}.prenom (README)
+  const [monPrenom, setMonPrenom] = useState(() => normNom((user?.displayName || "").split(" ")[0]));
+  useEffect(() => {
+    if (monPrenom) return;
+    getDoc(doc(db,"users",user.uid))
+      .then(s => { const p = s.exists() ? (s.data().prenom || "") : ""; if (p) setMonPrenom(normNom(p.split(" ")[0])); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [refreshTrigger, monPrenom]);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -122,13 +121,19 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
     await Promise.all([fetchBons(), fetchPlanningBons()]);
   };
 
+  // Bons visibles par le technicien connecté : ceux de l'équipe, et ceux à son nom.
+  // Le planning enregistre le collaborateur dans techNom (« Dimitri », « Georges », « Equipe ») :
+  // techId n'est jamais renseigné, on compare donc aussi avec le prénom du compte.
+  const estPourMoi = (b) =>
+    b.techNom === "Equipe" || (!!b.techId && b.techId === user.uid) || (!!monPrenom && normNom(b.techNom) === monPrenom);
+
   const fetchBons = async () => {
     const td   = todayStr();
     const tm   = tomorrowStr();
     const snap = await getDocs(collection(db,"bons"));
     const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
     setBons(
-      all.filter(b => (b.datePrevue === td || b.datePrevue === tm) && (b.techId === user.uid || b.techNom === "Equipe"))
+      all.filter(b => (b.datePrevue === td || b.datePrevue === tm) && estPourMoi(b))
          .sort((a,b) => (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||"")))
     );
   };
@@ -138,7 +143,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
     const snap = await getDocs(collection(db,"bons"));
     const all  = snap.docs.map(d => ({ id:d.id,...d.data() }));
     setPlanBons(
-      all.filter(b => b.datePrevue >= start && b.datePrevue <= end && (b.techId === user.uid || b.techNom === "Equipe"))
+      all.filter(b => (b.dateFinPrevue || b.datePrevue) >= start && b.datePrevue <= end && estPourMoi(b))
          .sort((a,b) => (a.datePrevue+(a.heurePrevue||"")).localeCompare(b.datePrevue+(b.heurePrevue||"")))
     );
   };
@@ -148,6 +153,16 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   // Un chantier ne peut être démarré que le jour même de l'intervention.
   // Les bons du lendemain sont consultables (préparation) mais verrouillés.
   const estJourJ = (b) => !!b && b.datePrevue === todayStr();
+
+  // Un nouveau chantier ne peut pas démarrer tant qu'un bon du jour, commencé par ce
+  // technicien (ou commencé avant l'enregistrement de demarrePar), n'est pas clôturé
+  // et signé par le client.
+  const bonEnCoursBloquant = (b, liste) =>
+    (liste || []).find(x =>
+      x.id !== b?.id && x.statut === "en cours" && x.datePrevue === todayStr() &&
+      jourMq(x.heureArrivee) === todayStr() &&
+      (!x.demarrePar || x.demarrePar === user.uid)
+    ) || null;
 
   const openBon = (b) => {
     setSelected(b);
@@ -174,17 +189,68 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
 
   const arriver = async () => {
     if (!estJourJ(selected)) return;   // sécurité : pas de démarrage avant le jour J
-    setSaving(true);
-    const geo = await getGeoLocation();
     const now = Timestamp.now();
-    await updateDoc(doc(db,"bons",selected.id), { heureArrivee:now, statut:"en cours", geoArrivee:geo });
-    setSelected({ ...selected, heureArrivee:now, statut:"en cours", geoArrivee:geo });
-    fetchAll();
-    setSaving(false);
+    setSaving(true);
+    try {
+      // Vérification à jour (bons du jour) ; hors connexion, on garde la liste affichée
+      let bonsJour = bons;
+      try {
+        const snap = await getDocs(query(collection(db,"bons"), where("datePrevue","==",todayStr())));
+        if (!snap.metadata.fromCache) {
+          const tous = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+          const frais = tous.find(x => x.id === selected.id);
+          if (!frais) { await fetchAll(); setView("list"); return; }            // bon déplacé ou supprimé
+          if (frais.statut !== "planifié") { setSelected(frais); await fetchAll(); return; } // déjà démarré ou clôturé
+          bonsJour = tous.filter(estPourMoi);
+        }
+      } catch (e) { console.warn("Vérification des bons du jour impossible :", e); }
+
+      // Le bon précédent doit être clôturé (signé) avant d'en démarrer un autre
+      if (bonEnCoursBloquant(selected, bonsJour)) { await fetchBons(); return; }
+
+      // Simple avertissement : un bon plus tôt dans la journée n'a pas été démarré
+      const oublie = bonsJour
+        .filter(x => x.id !== selected.id && x.datePrevue === todayStr() && x.statut === "planifié" &&
+                     (x.heurePrevue || "") < (selected.heurePrevue || ""))
+        .sort((a,b) => (a.heurePrevue || "").localeCompare(b.heurePrevue || ""))[0];
+      if (oublie && !window.confirm(
+        `Le bon ${oublie.ref || ""} de ${oublie.heurePrevue || "?"} (${nomClient(oublie)}) n'a pas été démarré.\n\n` +
+        "Démarrer quand même ce chantier ? Pensez à prévenir le bureau."
+      )) return;
+
+      const geo = await getGeoLocation();
+      await updateDoc(doc(db,"bons",selected.id), { heureArrivee:now, statut:"en cours", geoArrivee:geo, demarrePar:user.uid });
+      setSelected({ ...selected, heureArrivee:now, statut:"en cours", geoArrivee:geo, demarrePar:user.uid });
+      fetchAll();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Ouvre un bon en relisant son état : s'il a été clôturé entre-temps, on rafraîchit seulement
+  const ouvrirFrais = async (b) => {
+    try {
+      const snap = await getDoc(doc(db,"bons",b.id));
+      if (snap.exists() && snap.data().statut === "en cours") { openBon({ id:snap.id, ...snap.data() }); return; }
+      await fetchAll();
+    } catch (e) {
+      openBon(b);                       // hors connexion : copie locale
+    }
   };
 
   const terminer = async () => {
+    if (selected.datePrevue < todayStr()) return;   // bon d'un jour passé : clôture par le bureau
     setSaving(true);
+    try {
+      const snap = await getDoc(doc(db,"bons",selected.id));
+      if (snap.exists() && snap.data().statut === "terminé") {   // déjà clôturé (collègue ou bureau)
+        setSelected({ id:snap.id, ...snap.data() });
+        setShowChecklist(false);
+        setSaving(false);
+        fetchAll();
+        return;
+      }
+    } catch (e) { /* hors connexion : on continue avec la copie locale */ }
     const geo = await getGeoLocation();
     const now = Timestamp.now();
     const bonData = {
@@ -425,14 +491,14 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   if (view==="bon" && selected) return (
     <div className="container">
       <div className="page-header">
-        <button className="btn-back" onClick={() => setView("list")}>← Retour</button>
+        <button className="btn-back" onClick={() => { setView("list"); fetchAll(); }}>← Retour</button>
         <h2>{selected.ref}</h2>
         <span className="badge" style={{background:statutColor(selected.statut),color:statutText(selected.statut)}}>{selected.statut}</span>
       </div>
 
       {!estJourJ(selected) && selected.statut==="planifié" && (
         <div style={{background:"#f5e8d8",border:"0.5px solid #e8c9b8",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
-          <p style={{fontSize:13,fontWeight:600,color:"#6b4a31",margin:0}}>🔒 Consultation — intervention de demain</p>
+          <p style={{fontSize:13,fontWeight:600,color:"#6b4a31",margin:0}}>🔒 Consultation — intervention {selected.datePrevue === tomorrowStr() ? "de demain" : selected.datePrevue < todayStr() ? "d'un jour passé" : "à venir"}</p>
           <p style={{fontSize:11,color:"#8B6A4E",margin:"3px 0 0",textTransform:"capitalize"}}>
             {fmtDateCourt(selected.datePrevue)} à {selected.heurePrevue}
           </p>
@@ -565,9 +631,31 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           <div className="info-row"><span>Position arrivée</span><b style={{fontSize:12}}>📍 {selected.geoArrivee.lat?.toFixed(4)}, {selected.geoArrivee.lng?.toFixed(4)}</b></div>
         )}
         <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-          {selected.statut==="planifié" && (estJourJ(selected) ? (
+          {selected.statut==="planifié" && (estJourJ(selected) ? (bonEnCoursBloquant(selected, bons) ? (() => {
+            const prec = bonEnCoursBloquant(selected, bons);
+            return (
+              <div style={{width:"100%"}}>
+                <button className="btn-arrive" disabled style={{opacity:0.35,cursor:"not-allowed",width:"100%"}}>
+                  🔒 Arrivé sur le chantier
+                </button>
+                <div style={{background:"#f5e8d8",border:"0.5px solid #e8c9b8",borderRadius:10,padding:"10px 14px",marginTop:8}}>
+                  <p style={{fontSize:13,fontWeight:600,color:"#6b4a31",margin:0}}>✍️ Faites d'abord signer le bon précédent</p>
+                  <p style={{fontSize:12,color:"#8B6A4E",margin:"4px 0 8px",lineHeight:1.45}}>
+                    Le bon {prec.ref} ({nomClient(prec)}) est toujours en cours. Clôturez-le avec la signature du client avant de démarrer ce chantier.
+                  </p>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <button className="btn-outline sm" onClick={() => ouvrirFrais(prec)}>Ouvrir le bon {prec.ref} →</button>
+                    <button className="btn-outline sm" onClick={() => fetchBons()}>↻ Vérifier à nouveau</button>
+                  </div>
+                  <p style={{fontSize:11,color:"#8B6A4E",margin:"8px 0 0",lineHeight:1.45}}>
+                    Client absent ou parti sans signer ? Appelez le bureau au <a href="tel:0596736666" style={{color:"#6b4a31",fontWeight:600}}>0596 73 66 66</a> : il clôturera ce bon à distance.
+                  </p>
+                </div>
+              </div>
+            );
+          })() : (
             <button className="btn-arrive" disabled={saving} onClick={arriver}>📍 Arrivé sur le chantier</button>
-          ) : (
+          )) : (
             <div style={{width:"100%"}}>
               <button className="btn-arrive" disabled style={{opacity:0.35,cursor:"not-allowed",width:"100%"}}>
                 🔒 Arrivé sur le chantier
@@ -631,7 +719,10 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
               {saving?"Sauvegarde…":"Sauvegarder"}
             </button>
           )}
-          {selected.statut==="en cours" && (
+          {selected.statut==="en cours" && selected.datePrevue < todayStr() && (
+            <p style={{color:"#8B6A4E",fontSize:12,marginBottom:8,textAlign:"center"}}>🗂️ Bon d'un jour passé : sa clôture est faite par le bureau.</p>
+          )}
+          {selected.statut==="en cours" && selected.datePrevue >= todayStr() && (
             <div>
               {(!sigTech||!sigClient) && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Les deux signatures sont requises pour continuer</p>}
               {sigTech && sigClient && !prestationsOK && <p style={{color:"#e74c3c",fontSize:12,marginBottom:8,textAlign:"center"}}>⚠️ Il reste des prestations non traitées ({prestationsTraitees}/{prestations.length})</p>}
@@ -651,72 +742,7 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
   // ══════════════════════════════════════════════════════════════════════════
 
   if (tab==="planning") {
-    const week1 = getWeekDays(0);
-    const week2 = getWeekDays(1);
-
-    const PlanWeek = ({ days, label }) => {
-      const daysWithBons = days.filter(day => planBons.some(b => b.datePrevue === fmtDateKey(day)));
-      return (
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:10,fontWeight:600,color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"1.2px",marginBottom:8}}>
-            {label}
-          </div>
-          {daysWithBons.length === 0 && (
-            <p style={{fontSize:12,color:"var(--color-text-secondary)",fontStyle:"italic",paddingBottom:8}}>Aucune intervention.</p>
-          )}
-          {days.map(day => {
-            const dateStr = fmtDateKey(day);
-            const dayBons = planBons.filter(b => b.datePrevue === dateStr);
-            if (dayBons.length === 0) return null;
-            const todayDay = isToday(day);
-            return (
-              <div key={dateStr} style={{marginBottom:8}}>
-                <div style={{padding:"7px 12px",borderRadius:8,marginBottom:5,background:todayDay?"#35B499":"var(--color-background-secondary)",color:todayDay?"white":"var(--color-text-secondary)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontWeight:700,fontSize:13,textTransform:"capitalize"}}>
-                    {todayDay?"📍 ":""}{fmtDayLabel(day)}
-                  </span>
-                  <span style={{fontSize:10,opacity:0.8}}>{dayBons.length} bon{dayBons.length>1?"s":""}</span>
-                </div>
-                {dayBons.map(b => {
-                  const ville = extractVille(b.adresseIntervention||b.clientAdresse||"");
-                  const borderColor = b.statut==="terminé"?"#35B499":b.statut==="en cours"?"#E8845C":"#35B499";
-                  return (
-                    <div key={b.id} style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderLeft:`3px solid ${borderColor}`,borderRadius:"0 8px 8px 0",padding:"8px 12px",marginBottom:4}}>
-                      <div style={{fontWeight:600,fontSize:12,color:"var(--color-text-primary)",marginBottom:2}}>
-                        {b.heurePrevue} · {b.clientNom} {b.clientPrenom}
-                      </div>
-                      <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:2}}>{b.type}</div>
-                      {ville && <div style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 {ville}</div>}
-                      <span style={{display:"inline-block",marginTop:4,fontSize:9,padding:"1px 7px",borderRadius:20,background:statutColor(b.statut),color:statutText(b.statut),fontWeight:700,textTransform:"uppercase",letterSpacing:"0.3px"}}>
-                        {b.statut}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      );
-    };
-
-    const w1 = planBons.filter(b => b.datePrevue >= fmtDateKey(week1[0]) && b.datePrevue <= fmtDateKey(week1[6])).length;
-    const w2 = planBons.filter(b => b.datePrevue >= fmtDateKey(week2[0]) && b.datePrevue <= fmtDateKey(week2[6])).length;
-
-    return (
-      <div className="container">
-        <div style={{marginBottom:14}}>
-          <h2 style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary)",marginBottom:2}}>Mon planning</h2>
-          <p style={{fontSize:11,color:"var(--color-text-secondary)"}}>Semaine en cours &amp; semaine suivante</p>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-          <KPI label="Cette semaine"  value={w1} color="#35B499"/>
-          <KPI label="Sem. suivante" value={w2} color="#5C8EE8"/>
-        </div>
-        <PlanWeek days={week1} label="Semaine en cours"/>
-        <PlanWeek days={week2} label="Semaine suivante"/>
-      </div>
-    );
+    return <TechPlanning bons={planBons} onOpenBon={openBon} />;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -752,7 +778,9 @@ export default function TechDashboard({ user, tab = "interventions", refreshTrig
           {futur
             ? <span style={{fontSize:11,color:"#8B6A4E",fontWeight:600}}>🔒 Consulter →</span>
             : <>
-                {b.statut==="planifié" && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>}
+                {b.statut==="planifié" && (bonEnCoursBloquant(b, bons)
+                  ? <span style={{fontSize:11,color:"#8B6A4E",fontWeight:600}}>🔒 Après signature du bon en cours</span>
+                  : <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>📍 Signaler arrivée →</span>)}
                 {b.statut==="en cours" && <span style={{fontSize:11,color:"#E8845C",fontWeight:600}}>Clôturer →</span>}
                 {b.statut==="terminé"  && <span style={{fontSize:11,color:"#35B499",fontWeight:600}}>✓ Terminé</span>}
               </>}
