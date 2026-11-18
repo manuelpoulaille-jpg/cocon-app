@@ -30,7 +30,8 @@ Puis dans Firestore → collection "users" → créer un document par utilisateu
 ```
 Document ID = UID de l'utilisateur (visible dans Authentication)
 Champs :
-  - role : "admin"  (ou "technicien")
+  - role : "admin", "technicien" ou "bureau"
+    (bureau = accueil téléphonique : demandes de devis + planning en consultation, sans montants ni facturation)
   - nom : "SERVAND"
   - prenom : "Jean-Marc"
 ```
