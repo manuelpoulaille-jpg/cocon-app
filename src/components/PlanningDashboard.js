@@ -215,7 +215,8 @@ const fmtTimestamp = (ts) => ts?.toDate
   ? ts.toDate().toLocaleString("fr-FR", { timeZone:"America/Martinique", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
   : "";
 
-export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBon }) {
+// masquerMontants : vue « bureau », sans le CA prévisionnel.
+export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBon, masquerMontants = false }) {
   const isAdmin = isAdminProp !== undefined ? isAdminProp : user?.role === "admin";
 
   const [weekOffset, setWeekOffset] = useState(0);
@@ -2008,11 +2009,13 @@ export default function PlanningDashboard({ user, isAdmin: isAdminProp, onOpenBo
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${masquerMontants?2:3},1fr)`,gap:8,marginBottom:14}}>
         {[
           {label:"Interventions",val:bons.length,color:"#35B499",fmt:v=>v},
           {label:"Terminées",val:bons.filter(b=>b.statut==="terminé").length,color:"#35B499",fmt:v=>v},
-          {label:"CA prévisionnel",val:bons.reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0),color:"#8B6A4E",fmt:v=>v>0?v.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—"},
+          ...(masquerMontants ? [] : [
+            {label:"CA prévisionnel",val:bons.reduce((acc,b)=>acc+(parseFloat(b.montantFacture||0)),0),color:"#8B6A4E",fmt:v=>v>0?v.toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" €":"—"},
+          ]),
         ].map(({label,val,color,fmt})=>(
           <div key={label} style={{background:"var(--color-background-secondary)",borderRadius:10,padding:"10px",textAlign:"center"}}>
             <p style={{fontSize:val>9999?15:20,fontWeight:800,color,lineHeight:1.1}}>{fmt(val)}</p>

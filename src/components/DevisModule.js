@@ -104,7 +104,10 @@ const buildMessageWA = (d) => {
   ].filter(l => l !== null).join("\n");
 };
 
-export default function DevisModule({ onPlanifier }) {
+// mode "bureau" : saisie et suivi des demandes seulement. Pas de montant, pas de
+// suppression, pas de changement de statut ni de planification (réservés à l'admin).
+export default function DevisModule({ onPlanifier, mode = "admin" }) {
+  const bureau = mode === "bureau";
   const [devis,         setDevis]         = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [saving,        setSaving]        = useState(false);
@@ -172,7 +175,7 @@ export default function DevisModule({ onPlanifier }) {
     setSaving(true);
     try {
       await addDoc(collection(db, "devis"), {
-        ...form, statut: form.statut || "demande", createdAt: Timestamp.now(),
+        ...form, statut: bureau ? "demande" : (form.statut || "demande"), createdAt: Timestamp.now(),
       });
       setForm({ ...EMPTY_FORM });
       setView("list");
@@ -369,6 +372,7 @@ export default function DevisModule({ onPlanifier }) {
         <LignesEditor lignes={form.lignes} onChange={l => setForm(f => ({...f, lignes:l}))}/>
       </div>
 
+      {!bureau && (
       <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:14 }}>
         <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Statut initial</p>
         <div style={{ display:"flex", gap:8 }}>
@@ -390,6 +394,7 @@ export default function DevisModule({ onPlanifier }) {
           ))}
         </div>
       </div>
+      )}
 
       <button onClick={createDevis}
         disabled={saving || (!form.clientNom && !form.clientSociete) || !form.type}
@@ -473,7 +478,7 @@ export default function DevisModule({ onPlanifier }) {
       <div style={{ padding:20, maxWidth:520 }}>
 
         {/* Confirmation suppression */}
-        {confirmDelete && (
+        {confirmDelete && !bureau && (
           <div style={{ background:"#fdecea", border:"1px solid #f5c6cb", borderRadius:10, padding:"12px 16px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
             <span style={{ color:"#c0392b", fontSize:13, fontWeight:600 }}>Supprimer cette demande ?</span>
             <div style={{ display:"flex", gap:8 }}>
@@ -505,10 +510,12 @@ export default function DevisModule({ onPlanifier }) {
             ✏️ Modifier
           </button>
           {/* Supprimer */}
-          <button onClick={() => setConfirmDelete(true)}
-            style={{ padding:"6px 12px", borderRadius:8, border:"0.5px solid #f5c6cb", background:"#fdecea", cursor:"pointer", fontSize:12, color:"#c0392b" }}>
-            🗑
-          </button>
+          {!bureau && (
+            <button onClick={() => setConfirmDelete(true)}
+              style={{ padding:"6px 12px", borderRadius:8, border:"0.5px solid #f5c6cb", background:"#fdecea", cursor:"pointer", fontSize:12, color:"#c0392b" }}>
+              🗑
+            </button>
+          )}
         </div>
 
         {/* Fiche contact */}
@@ -556,7 +563,7 @@ export default function DevisModule({ onPlanifier }) {
                 ["clientEmail",   "Email",           "email" ],
                 ["clientPrenom",  "Prénom",          "text"  ],
                 ["numDevis",      "N° devis MediaBat","text" ],
-                ["montant",       "Montant TTC (€)", "number"],
+                ...(bureau ? [] : [["montant", "Montant TTC (€)", "number"]]),
               ].map(([key, label, type]) => (
                 <div key={key}>
                   <label style={{ fontSize:11, color:"#888", display:"block", marginBottom:4 }}>{label}</label>
@@ -591,6 +598,7 @@ export default function DevisModule({ onPlanifier }) {
         )}
 
         {/* Changer le statut librement */}
+        {!bureau && (
         <div style={{ background:"white", borderRadius:10, border:"0.5px solid #e0ddd8", padding:16, marginBottom:12 }}>
           <p style={{ fontSize:10, fontWeight:600, color:"#888", textTransform:"uppercase", letterSpacing:"0.8px", margin:"0 0 12px" }}>Statut</p>
           <div style={{ display:"flex", gap:8 }}>
@@ -617,6 +625,7 @@ export default function DevisModule({ onPlanifier }) {
             ))}
           </div>
         </div>
+        )}
 
         {/* Actions */}
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -631,15 +640,17 @@ export default function DevisModule({ onPlanifier }) {
               }}>
                 {copiedId === selected.id ? "✅ Message copié !" : "📋 Copier le message"}
               </button>
-              <button onClick={() => valider(selected)} style={{
-                flex:1, padding:"11px", borderRadius:9, border:"none",
-                background:"#35B499", color:"white", cursor:"pointer", fontSize:13, fontWeight:700,
-              }}>
-                ✓ Marquer validé
-              </button>
+              {!bureau && (
+                <button onClick={() => valider(selected)} style={{
+                  flex:1, padding:"11px", borderRadius:9, border:"none",
+                  background:"#35B499", color:"white", cursor:"pointer", fontSize:13, fontWeight:700,
+                }}>
+                  ✓ Marquer validé
+                </button>
+              )}
             </>
           )}
-          {selected.statut === "validé" && !planFormOpen && (
+          {selected.statut === "validé" && !planFormOpen && !bureau && (
             <>
               <button onClick={() => { setPlanForm({ datePrevue:"", heurePrevue:"08:00", techNom:"", multiJours:false }); setPlanFormOpen(true); }} style={{
                 flex:1, padding:"11px", borderRadius:9, border:"none",
@@ -655,7 +666,7 @@ export default function DevisModule({ onPlanifier }) {
               </button>
             </>
           )}
-          {selected.statut === "validé" && planFormOpen && (
+          {selected.statut === "validé" && planFormOpen && !bureau && (
             <div style={{
               width:"100%", background:"#f7fdfb", border:"0.5px solid #a0dece",
               borderRadius:10, padding:16,
@@ -739,7 +750,7 @@ export default function DevisModule({ onPlanifier }) {
     <div style={{ padding:20 }}>
 
       {/* Alerte validés en attente */}
-      {stats.valides > 0 && (
+      {stats.valides > 0 && !bureau && (
         <div style={{
           background:"#fff8f0", border:"0.5px solid #e8c9b8",
           borderRadius:10, padding:"12px 16px", marginBottom:16,
@@ -811,7 +822,7 @@ export default function DevisModule({ onPlanifier }) {
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, minWidth:560 }}>
               <thead>
                 <tr style={{ borderBottom:"0.5px solid #e8e5e0" }}>
-                  {["Contact","Type","Source","N° devis","Montant","Statut",""].map(h => (
+                  {["Contact","Type","Source","N° devis",...(bureau ? [] : ["Montant"]),"Statut",""].map(h => (
                     <th key={h} style={{
                       textAlign:"left", fontSize:"9.5px", fontWeight:500, color:"#888",
                       textTransform:"uppercase", letterSpacing:"0.8px",
@@ -840,9 +851,11 @@ export default function DevisModule({ onPlanifier }) {
                     <td style={{ padding:"10px 12px", fontSize:11, color:"#888" }}>
                       {d.numDevis || "—"}
                     </td>
-                    <td style={{ padding:"10px 12px", fontSize:12, fontWeight:600, whiteSpace:"nowrap", color: d.montant ? "#35B499" : "#ccc" }}>
-                      {d.montant ? parseFloat(d.montant).toFixed(2) + " €" : "—"}
-                    </td>
+                    {!bureau && (
+                      <td style={{ padding:"10px 12px", fontSize:12, fontWeight:600, whiteSpace:"nowrap", color: d.montant ? "#35B499" : "#ccc" }}>
+                        {d.montant ? parseFloat(d.montant).toFixed(2) + " €" : "—"}
+                      </td>
+                    )}
                     <td style={{ padding:"10px 12px" }}>
                       <StatutBadge s={d.statut}/>
                     </td>
@@ -857,7 +870,7 @@ export default function DevisModule({ onPlanifier }) {
                           cursor:"pointer", fontWeight:600, transition:"all .15s",
                         }}>{copiedId === d.id ? "✅ Copié" : "📋 Copier"}</button>
                       )}
-                      {d.statut === "validé" && (
+                      {d.statut === "validé" && !bureau && (
                         <button onClick={() => startPlanification(d)} style={{
                           fontSize:10, padding:"4px 10px", borderRadius:6, border:"none",
                           background:"#35B499", color:"white", cursor:"pointer", fontWeight:700,

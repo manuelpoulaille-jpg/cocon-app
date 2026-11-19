@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import AdminDashboard from "./components/AdminDashboard";
+import BureauDashboard from "./components/BureauDashboard";
 import TechDashboard from "./components/TechDashboard";
 import PropositionRdv from "./components/PropositionRdv";
 import "./App.css";
@@ -14,6 +15,8 @@ export default function App() {
   const [email, setEmail]         = useState("");
   const [password, setPassword]   = useState("");
   const [error, setError]         = useState("");
+  const [info, setInfo]           = useState("");
+  const [sendingReset, setSendingReset] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [tab, setTab]             = useState("interventions");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -27,6 +30,10 @@ export default function App() {
       } else {
         setUser(null);
         setRole(null);
+        // Poste partagé : ne pas laisser les identifiants du compte précédent à l'écran.
+        setPassword("");
+        setError("");
+        setInfo("");
       }
       setLoading(false);
     });
@@ -36,13 +43,42 @@ export default function App() {
   const login = async (e) => {
     e.preventDefault();
     setError("");
+    setInfo("");
     setLoggingIn(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      setPassword("");
     } catch (err) {
       setError("Email ou mot de passe incorrect.");
     }
     setLoggingIn(false);
+  };
+
+  // Mot de passe oublié / premier accès : Firebase envoie un lien pour choisir son mot de passe.
+  // Même message que le compte existe ou non, pour ne pas révéler les adresses inscrites.
+  const resetPassword = async () => {
+    if (sendingReset) return;
+    setError("");
+    setInfo("");
+    if (!email) { setError("Saisissez d'abord votre adresse e-mail."); return; }
+    setSendingReset(true);
+    try {
+      auth.languageCode = "fr";
+      await sendPasswordResetEmail(auth, email);
+    } catch (err) {
+      const code = err?.code;
+      if (code === "auth/invalid-email") { setError("Adresse e-mail invalide."); return; }
+      // auth/user-not-found reste silencieux (même réponse que si le compte existe).
+      if (code !== "auth/user-not-found") {
+        setError(code === "auth/too-many-requests"
+          ? "Trop de demandes, réessayez dans quelques minutes."
+          : "L'e-mail n'a pas pu être envoyé. Vérifiez votre connexion et réessayez.");
+        return;
+      }
+    } finally {
+      setSendingReset(false);
+    }
+    setInfo("Si un compte existe pour cette adresse, un e-mail pour choisir votre mot de passe vient d'être envoyé. Pensez à regarder dans les spams.");
   };
 
   // ── PAGE PUBLIQUE : le client choisit un créneau proposé (lien ?rdv=…) ─────
@@ -71,6 +107,7 @@ export default function App() {
         </div>
         <form onSubmit={login}>
           {error && <div className="error-msg">{error}</div>}
+          {info && <div style={{background:"#e1f5ee",color:"#0e6b50",border:"0.5px solid #a0dece",borderRadius:8,padding:"10px 12px",fontSize:13,marginBottom:12}}>{info}</div>}
           <div className="field">
             <label>Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="votre@email.com" required />
@@ -82,6 +119,10 @@ export default function App() {
           <button type="submit" className="btn-primary" disabled={loggingIn}>
             {loggingIn ? "Connexion…" : "Se connecter"}
           </button>
+          <button type="button" onClick={resetPassword} disabled={sendingReset || loggingIn}
+            style={{display:"block",margin:"12px auto 0",background:"none",border:"none",cursor:"pointer",fontSize:12,color:"#35B499",textDecoration:"underline"}}>
+            {sendingReset ? "Envoi…" : "Mot de passe oublié ou premier accès ?"}
+          </button>
         </form>
       </div>
     </div>
@@ -91,6 +132,12 @@ export default function App() {
 
   if (role === "admin") {
     return <AdminDashboard user={user} onLogout={() => signOut(auth)} />;
+  }
+
+  // ── BUREAU : demandes de devis + planning en consultation, sans montants ──
+
+  if (role === "bureau") {
+    return <BureauDashboard user={user} onLogout={() => signOut(auth)} />;
   }
 
   // ── TECHNICIEN : layout mobile avec header + bottom nav ───────────────────
